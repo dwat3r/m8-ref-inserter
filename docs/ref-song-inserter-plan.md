@@ -79,7 +79,7 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - Instrument 7F is not split across a second instrument; more than 128 slices is an error.
 - A used id aborts instead of shifting the block to B0, A0 and so on (earlier design).
 - The sampler comes from a template file because the crate has no `Default` for `Sampler` or `SynthParams`.
-- The M8 writes the `cue ` marker format DigiChain also writes; confirmed working on the user's M8.
+- The tool writes the `cue ` marker layout that DigiChain uses; the M8 reads it as slices, confirmed on the user's M8.
 - The commit history uses the GitHub noreply address; the work email never reached the remote.
 
 ## Open items
