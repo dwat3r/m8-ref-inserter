@@ -54,7 +54,7 @@ pub fn run(request: &Request) -> Result<Option<String>, String> {
         .file_stem()
         .ok_or_else(|| format!("{} has no file name", request.reference_wav.display()))?
         .to_string_lossy();
-    let file_name = format!("{stem}_1.wav");
+    let file_name = format!("{stem}.wav");
     let sample_path = format!("{}/{file_name}", request.m8_dir.trim_end_matches('/'));
     if sample_path.len() > MAX_SAMPLE_PATH_LEN {
         return Err(format!("sample path {sample_path} is longer than {MAX_SAMPLE_PATH_LEN} characters"));

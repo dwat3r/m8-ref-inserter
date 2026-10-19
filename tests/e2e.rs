@@ -86,7 +86,7 @@ fn run_in(workspace: &Workspace) -> Result<Option<String>, String> {
 }
 
 fn m8_dir_for_path_len(path_len: usize) -> String {
-    "a".repeat(path_len - "/reference_1.wav".len())
+    "a".repeat(path_len - "/reference.wav".len())
 }
 
 fn reference_sampler(workspace: &Workspace) -> Sampler {
@@ -122,7 +122,7 @@ fn input_project_is_unchanged() {
 fn instrument_points_at_the_m8_side_sample_path() {
     let workspace = workspace(SLICES);
     run_in(&workspace).unwrap();
-    assert_eq!(reference_sampler(&workspace).sample_path, "/Samples/ref/reference_1.wav");
+    assert_eq!(reference_sampler(&workspace).sample_path, "/Samples/ref/reference.wav");
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn track_one_holds_one_chain_per_slice() {
 fn copied_wav_has_one_cue_point_per_slice() {
     let workspace = workspace(SLICES);
     run_in(&workspace).unwrap();
-    let copied = std::fs::read(workspace.dest.join("reference_1.wav")).unwrap();
+    let copied = std::fs::read(workspace.dest.join("reference.wav")).unwrap();
     let cue = copied.windows(4).position(|w| w == b"cue ").unwrap();
     let count = u32::from_le_bytes(copied[cue + 8..cue + 12].try_into().unwrap());
     assert_eq!(count as usize, SLICES);
@@ -201,7 +201,7 @@ fn output_equal_to_input_is_rejected() {
 #[test]
 fn existing_copied_wav_is_not_overwritten() {
     let workspace = workspace(SLICES);
-    let copied = workspace.dest.join("reference_1.wav");
+    let copied = workspace.dest.join("reference.wav");
     std::fs::create_dir_all(&workspace.dest).unwrap();
     std::fs::write(&copied, b"keep me").unwrap();
     run_in(&workspace).unwrap_err();

@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use m8_file_parser::{Note, SamplePlayMode, SongSteps};
 
-    const PATH: &str = "/Samples/ref/song_1.wav";
+    const PATH: &str = "/Samples/ref/song.wav";
     const EMPTY_ID: u8 = 0xFE;
     const SLICES: usize = 3;
     const DEFAULT_START_ID: usize = 0xC0;
