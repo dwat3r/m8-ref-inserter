@@ -3,9 +3,11 @@ mod common;
 use common::{
     PROJECT_FIXTURE, SAMPLE_RATE, Workspace, request, slice_frames, wav_bytes, workspace_with,
 };
+use ref_inserter::insert::Options;
+use ref_inserter::inspect::{inspect, inspect_project};
 use ref_inserter::{
-    Insertion, Project, Reference, Report, Request, Settings, Source, insert_reference,
-    plan_insertion, run,
+    DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Insertion, Project, Reference,
+    Report, Request, Settings, Source, insert_reference, plan_insertion, run,
 };
 
 const SLICES: u32 = 3;
@@ -84,6 +86,22 @@ fn core_summary_is_the_start_of_the_run_summary() {
     let (_, report) = run_on_disk(&inputs);
     let core_summary = insert(&inputs).summary;
     assert_eq!(report.summary()[..core_summary.len()], core_summary[..]);
+}
+
+#[test]
+fn inspect_project_lines_equal_the_lines_inspect_prints_for_the_file() {
+    let inputs = inputs();
+    let (workspace, _) = run_on_disk(&inputs);
+    let options = Options {
+        empty: DEFAULT_EMPTY_ID,
+        phrase: DEFAULT_PHRASE_ID,
+        chain_phrases: DEFAULT_CHAIN_PHRASES,
+    };
+    let inserted = Project::parse(&insert(&inputs).project, PROJECT_NAME).unwrap();
+    assert_eq!(
+        inspect_project(&inserted, &options),
+        inspect(&workspace.out, &options).unwrap()
+    );
 }
 
 #[test]

@@ -1,3 +1,4 @@
+use crate::Project;
 use crate::insert::{Options, PHRASES_PER_SLICE, REF_INSTRUMENT_SLOT};
 use crate::previous::{PreviousInsertion, previous_insertion, slice_groups};
 use m8_file_parser::{Instrument, Song, SongSteps};
@@ -78,18 +79,22 @@ fn stray_line(song: &Song, options: &Options) -> Option<String> {
         })
 }
 
+pub fn inspect_project(project: &Project, options: &Options) -> Vec<String> {
+    let song = &project.song;
+    [
+        vec![
+            format!("FW {}, tempo {}", song.version, song.tempo),
+            instrument_line(song),
+        ],
+        previous_lines(song, options),
+        stray_line(song, options).into_iter().collect(),
+    ]
+    .concat()
+}
+
 pub fn inspect(project: &Path, options: &Options) -> Result<Vec<String>, String> {
     let bytes =
         std::fs::read(project).map_err(|e| format!("cannot read {}: {e}", project.display()))?;
-    let song = Song::read(&mut bytes.as_slice())
-        .map_err(|e| format!("cannot parse {}: {e:?}", project.display()))?;
-    Ok([
-        vec![
-            format!("FW {}, tempo {}", song.version, song.tempo),
-            instrument_line(&song),
-        ],
-        previous_lines(&song, options),
-        stray_line(&song, options).into_iter().collect(),
-    ]
-    .concat())
+    let parsed = Project::parse(&bytes, &project.display().to_string())?;
+    Ok(inspect_project(&parsed, options))
 }
