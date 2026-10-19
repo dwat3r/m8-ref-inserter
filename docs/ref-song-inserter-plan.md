@@ -1,6 +1,6 @@
 # Reference Song Inserter
 
-Status: built, tested (157 tests), pushed to https://github.com/dwat3r/m8-ref-inserter (MIT).
+Status: built and released as v0.1.0 (https://github.com/dwat3r/m8-ref-inserter/releases/tag/v0.1.0, MIT). 203 tests: 116 unit, 7 CLI, 79 e2e, 1 round-trip. CI passes on Linux, Windows and macOS (arm64 and Intel).
 
 **Goal:** CLI that inserts a reference WAV into a Dirtywave M8 project (FW 6.6) as a sliced sampler instrument (7F) plus chains that play the slices, placed after the existing song, written to a new `.m8s`.
 
@@ -33,7 +33,7 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - **Chain ids:** block `[start, start + chains)` with `start = min(0xC0, (0xF0 - chains) / 0x10 * 0x10)`: C0 up to 48 chains, then B0, A0, 90, 80, 70 (128 slices at 4 phrases per chain starts at 70). There is no shifting for used ids: a used chain id in the block aborts with a `--force` hint. A used phrase P (content or referenced by a chain) aborts the same way. "Used" chain = non-empty or referenced by a song cell; "used" phrase = non-empty or referenced by a chain step.
 - **Empty id E** (default FE): phrase E must be empty, chain E must be silent (every step is phrase E or empty; an existing `[E, E, E, E]` chain is accepted and never touched). E must be below 0xFF and outside the chain block.
 - **Song view:** chains go on track 1, one song row per chain, starting 8 rows below the last used row across all tracks (row 0 on an empty song). Tracks 2 to 8 get chain E at the first reference row only. The rows must fit within 0x100.
-- **Overwriting:** chains, phrases and song cells that are not this tool's are never overwritten, even with `--force`. The input project is never overwritten, even with `--force` (same-file check on canonical paths). `--out` and the copied WAV are refused when they exist, unless `--force`.
+- **Overwriting:** chains, phrases and song cells that are not this tool's are never overwritten, even with `--force`. The input project is never overwritten, even with `--force` (same-file check on canonical paths). An existing `--out` is refused unless `--force`. An existing copied WAV is reused when it is byte-identical to the one that would be written, and refused when it differs unless `--force`.
 - **Instrument 7F already used:** error unless `--force`.
 
 ## `--force`
@@ -60,18 +60,18 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - `tests/cli.rs`: the built binary: `--version`, bare insert still works, missing arguments, `inspect`, `--help`.
 - `tests/common/mod.rs`: the shared WAV generator.
 - `README.md`, `LICENSE` (MIT).
-- `.github/workflows/ci.yml`: on push and pull request to `master`, and on `v*` tags. Matrix: macOS arm64 (tests, build), macOS x86_64 (cross-compiled on the arm64 runner, build only, to avoid paid Intel runners), Linux x86_64 and Windows x86_64 (tests, build). Each job packages `ref_inserter-<target>.tar.gz` (binary, README, LICENSE) as a workflow artifact; a tag push also creates a GitHub Release with `gh release create` and attaches the archives.
+- `.github/workflows/ci.yml`: on push and pull request to `master`, and on `v*` tags. A `lint` job runs `cargo fmt --check` and `cargo clippy --all-targets --locked -- -D warnings`. The build matrix is macOS arm64 (`macos-latest`: tests, build), macOS x86_64 (cross-compiled on the arm64 runner, build only, to avoid paid Intel runners), Linux x86_64 and Windows x86_64 (tests, build). Each build job packages `ref_inserter-<target>.tar.gz` (binary, README, LICENSE) as a workflow artifact. A tag push also runs the `release` job, which downloads the archives and runs `gh release create` with generated notes.
 
 ## `run` order
 
 1. Refuse `--out` that is the input project; refuse an existing `--out` unless `--force`.
-2. Read and parse the project, parse the WAV, compute slices.
+2. Read and parse the project, parse the WAV, validate the tempo (`--bpm` or `Song.tempo`: finite and positive), compute slices.
 3. Detect a previous insertion; note whether instrument 7F is used; with `--force` clear the previous insertion and stray phrase.
 4. `plan_layout` (version, slice count, chain phrases, ids, silent E, free chain block, free phrase P, rows).
 5. Error if 7F is used without `--force`; build the slug and sample path (length check); an existing copied WAV that is byte-identical to the one that would be written is reused (nothing is written for it, the summary says "already up to date"); a differing one is refused unless `--force`.
 6. `apply` and serialize the song in memory.
 7. Only then (and only without `--dry-run`) create `--dest-dir`, write the WAV, write `--out`.
-8. Return a `Report`; `main` prints its warnings to stderr and its summary (slice and chain counts, chain ids, song rows, shared phrase, sample path, written or dry run) to stdout.
+8. Return a `Report`; `main` prints its warnings to stderr and its summary to stdout: slice and chain counts, chain ids, song rows, slice length in seconds with the tempo used, reference length, shared phrase, sample path, and whether the files were written, are up to date, or (dry run) would be written.
 
 ## `inspect`
 
@@ -88,6 +88,14 @@ Runs every check and the full in-memory build, including all refusals (existing 
 - Property tests (e2e) loop over slice counts 1, 4, 5, 49 and 128 and chain phrases 4, 8, 12 and 16: a forced rerun reproduces the original byte for byte (also next to existing song content), and switching packing with `--force` equals a fresh insert of the new packing.
 - Mutation checks: breaking the chain transpose, the clearing of old phrases, and the clearing of the silent track cells are each caught by the matching tests.
 
+## Release
+
+- v0.1.0 was tagged on `c396031` after CI passed there (lint and all four build jobs), and the tag run's `release` job published it: four archives, `ref_inserter-<target>.tar.gz` for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`. The release is public, not a draft, not a pre-release.
+- Process for the next release: bump `version` in `Cargo.toml`, push to `master`, wait for CI to pass, then tag `vX.Y.Z` (matching the Cargo version) on that commit and push the tag. The release job does the rest.
+- Checked on the real artifact: the Apple silicon archive was downloaded from the release and `--version` and `inspect` ran. The other three archives were built and tested by CI (the Intel macOS build is cross-compiled with no test run) but not executed by hand.
+- A binary downloaded through a browser on macOS may be quarantined as from an unidentified developer; downloading with `gh` or `xattr -d com.apple.quarantine ref_inserter` avoids that.
+- `rust-version` is not set in `Cargo.toml`: a minimum Rust version cannot be verified without older toolchains (edition 2024 itself needs 1.85).
+
 ## Decisions and history
 
 - Instrument 7F is not split across a second instrument; more than 128 slices is an error.
@@ -95,11 +103,24 @@ Runs every check and the full in-memory build, including all refusals (existing 
 - The sampler comes from a template file because the crate has no `Default` for `Sampler` or `SynthParams`.
 - The tool writes the `cue ` marker layout that DigiChain uses; the M8 reads it as slices, confirmed on the user's M8.
 - The commit history uses the GitHub noreply address; the work email never reached the remote.
+- A length-based BPM check was rejected (real tracks have silence and tails). The tool trusts the tempo, offers `--bpm`, and states the slice length in seconds in the summary instead.
+- An identical existing copied WAV is reused instead of refused, so several projects can share one reference WAV without `--force`.
+- `--dry-run` runs every check and refusal and writes nothing; warnings use tense-neutral wording so they read correctly in both modes.
+- `inspect` is an optional subcommand and the bare insert form still works.
+- Spilling more than 128 slices into a second sampler was considered again and declined.
 
 ## Open items
 
-- Packed layouts need an M8 check (see Hardware status).
+- Packed layouts (`--chain-phrases` above 4) need an M8 check (see Hardware status).
 - Empty-song start row is 0 with no gap, an assumption nobody objected to.
-- The CI workflow has not run yet: the Windows and Linux test runs and the Intel macOS cross-build are unverified until the first run (locally only the arm64 commands were run).
-- The `Song::write` panic on files older than FW 6.5 is a crate bug and has not been reported upstream.
+- The `Song::write` panic on files older than FW 6.5 and the missing `Default` for `Sampler` are crate issues in `m8-file-parser`, not reported upstream. Fixing them would allow dropping the FW 6.6 only limit and the sampler template.
 - The sampler template's instrument file version header reads 6.0.2, while projects read 6.6.2. It loads fine on the M8.
+- What the M8 accepts as a WAV (bit depth, channels, sample rate) is not validated; the tool only requires PCM.
+
+## Possible next steps
+
+- Checksums for the release archives, Dependabot for Actions and Cargo, a `CHANGELOG.md`, a `cargo install --git` line in the README.
+- `--sd-root` to derive `--dest-dir` from `--m8-dir` explicitly instead of typing both.
+- Binary name with a hyphen to match the repository name.
+- Shell completions through `clap_complete`.
+- GitHub repository description and topics (currently empty).
