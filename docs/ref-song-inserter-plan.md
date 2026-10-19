@@ -1,206 +1,90 @@
-# Reference Song Inserter Implementation Plan
+# Reference Song Inserter
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Do not commit: the user commits.
+Status: built, tested (157 tests), pushed to https://github.com/dwat3r/m8-ref-inserter (MIT).
 
-**Goal:** CLI that inserts a reference WAV into an M8 project as a sliced sampler instrument (7f) plus one chain per slice, placed after the existing song, written to a new `.m8s`.
+**Goal:** CLI that inserts a reference WAV into a Dirtywave M8 project (FW 6.6) as a sliced sampler instrument (7F) plus chains that play the slices, placed after the existing song, written to a new `.m8s`.
 
-**Architecture:** Single Rust binary. `wav.rs` (RIFF parse, slice points, cue chunk), `alloc.rs` (pure id/row allocation), `insert.rs` (validates + mutates `Song`), `main.rs` (clap, file IO). `Song` is read with `m8-file-parser`, mutated in memory, written by patching the original bytes in place (`Writer::new(original_bytes)`, `Song::write` seeks to each section).
+**Architecture:** Rust lib + bin. The project is read with `m8-file-parser`, mutated in memory, and written by patching the original bytes (`Writer::new(original_bytes)`, `Song::write` seeks to each section). All validation and serialization happen in memory before any file is written.
 
-**Tech Stack:** Rust 2021, `m8-file-parser` (MIT, Twinside; git main, pinned rev, because crates.io 0.7 may lack song writing), `clap` (derive).
+**Tech stack:** Rust 2024, `m8-file-parser` (MIT, Twinside, git dependency pinned to rev `08d68bc`), `clap` (derive), `tempfile` (dev only).
 
-## Global Constraints
+## Hardware status
 
-- CLI: `ref_inserter <project.m8s> <ref.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it, e.g. /Samples/ref> --out <new.m8s> [--empty-id <hex, default FE>] [--phrase-id <hex, default F0>] [--force]`
-- FW 6.6 only. A project with another version is an error. The crate's `Song::write` panics on files older than 6.5 anyway.
-- Input project is never modified. Only `--out` and the copied WAV are written.
-- BPM comes from `Song.tempo`. Reference is trusted to match. Audio starts at beat 0, no offset.
-- WAV only (PCM). Anything else: error telling the user to convert.
-- Slice length = 16 beats = round(960 * sample_rate / bpm) frames. Slices N = ceil(total_frames / slice_frames); the partial tail is a slice.
-- N > 128: error, before any write. Error if N == 0.
-- Instrument 7f: Sampler, name `REFERENCE`, play mode FWD, slice param 01, other params default. If 7f is already used: error, unless `--force` (replaces it with a warning; a previous insertion's instrument is replaced silently as part of that insertion).
-- Ids: reference chains use the block [start, start + N), start = `min(0xC0, (0xF0 - chains) / 0x10 * 0x10)` with chains as above (C0 up to 48 slices, then B0 up to 64, A0 up to 80, 90 up to 96, 80 up to 112, 70 up to 128). Only chain ids are consumed there. The one shared phrase uses `--phrase-id` (default F0, must differ from the empty id). No shifting for used ids: if any chain id in the block is used, or the phrase id is used, abort with a message that suggests `--force`.
-- "Used" chain = non-empty chain or referenced by a song cell. "Used" phrase = non-empty phrase or referenced by a chain step.
-- Empty id E (default FE): phrase E must be empty and chain E must be silent (every step is phrase E or 0xFF; an existing `[E, E, E, E]` chain is accepted and left untouched), else error. Error if E is inside the chosen block.
-- Shared phrase P (`--phrase-id`): row 0 = note 0 (C-1, slice 1), velocity unset, instrument 7f, other rows empty. Each slice takes a 4-step group `[P with transpose = slice index, E, E, E]`. `--chain-phrases` (4, 8, 12 or 16, default 4, else error) sets how many steps of a chain are used, so n/4 slices share a chain and the rest of the chain is 0xFF; the last chain may be partly filled. Chains needed = ceil(slices / (n/4)). Sampler TRANSP is on in the template (chain transpose selecting the slice is unverified on hardware).
-- Song view: reference on track 1 (index 0), one row per chain. Start row = last used row across all tracks + 1 + 8 (empty song: row 0). Track 1 rows start_row..start_row+N get chain ids start..start+N. Tracks 2 to 8 get chain E at start_row only. Error if start_row + N > 0x100.
-- Never overwrite existing chains, phrases, song cells. `--force` removes only a previous insertion of this tool, identified by its signature, and replaces instrument 7f. Anything else in the way aborts even with `--force`.
-- Previous-insertion signature (`previous.rs`): instrument 7f is a Sampler (any name), and either (shared phrase layout) chain c < 0xF0 is one or more `[P, E, E, E]` groups (zero transpose on the E steps) followed by empty steps, and phrase P plays the reference, whatever `--chain-phrases` was; or (old layout, one phrase per chain) chain c is `[c, E, E, E]` and phrase c plays the reference. `--force` clears those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row, then inserts fresh. Separately, with `--force`, the shared phrase P is cleared (with a warning) when it holds exactly one non-empty step, a note on instrument 7f, even if no chain owns it. It also overwrites an existing copied WAV and an existing `--out`, and warns. The input project is never overwritten.
-- WAV is copied to `<dest-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)`. Sample path stored in the instrument: `<m8-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)` (max 127 chars).
-- Split files and 7e spill are out of scope (error at N > 128 instead).
+- Verified on an M8 by the user: the default layout (shared phrase F0, one chain per slice, chain transpose selects the slice), WAV cue-chunk slices, instrument 7F settings, `--force` on a project with an unfinished manual attempt.
+- Not verified on hardware: packed layouts (`--chain-phrases 8`, `12`, `16`). Covered only by tests and byte-level checks.
 
-## File Structure
+## CLI
 
-- `Cargo.toml`: deps.
-- `src/main.rs`: args, IO, orchestration. No logic.
+```
+ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it> --out <new.m8s>
+             [--empty-id <hex, default FE>] [--phrase-id <hex, default F0>]
+             [--chain-phrases <4|8|12|16, default 4>] [--force]
+```
+
+## Behavior
+
+- **Input:** FW 6.6 projects only (error otherwise). The crate's `Song::write` panics on files older than 6.5. BPM comes from `Song.tempo`, the reference is trusted to match and starts at beat 1. PCM WAV only.
+- **Slices:** length 16 beats = `round(960 * sample_rate / bpm)` frames. Count = `ceil(frames / slice_frames)`, the partial tail is a slice. 0 slices or more than 128 is an error.
+- **Output WAV:** copied to `<dest-dir>/<slug>.wav` with a `cue ` chunk, one point per slice. `slug` is the WAV file stem with each run of characters outside `[A-Za-z0-9_-]` replaced by one `_`, trimmed of leading and trailing `_` (error if empty). The instrument stores `<m8-dir>/<slug>.wav` (max 127 characters).
+- **Cue chunk** (layout from DigiChain's M8-compatible writer): size field `4 + 24 * slices`, slice count, then per point 24 bytes: id (0-based), position 0, `data`, chunk start 0, block start 0, sample offset = start frame. The chunk follows `data`.
+- **Instrument 7F:** the sampler template `assets/sampler.m8i` (untouched FW 6.6 export, TRANSP on) with name `REFERENCE`, play mode FWD, slice 01, and the sample path.
+- **Shared phrase P** (`--phrase-id`, default F0, must differ from the empty id): row 0 = note C-1 (slice 1), velocity unset (0xFF), instrument 7F, other rows empty.
+- **Chains:** each slice takes a 4-step group `[P with transpose = slice index, E, E, E]` where E is the empty id. `--chain-phrases n` (4, 8, 12 or 16, else error) puts n/4 groups in a chain, the rest of the chain is empty, and the last chain may be partly filled. Chains needed = `ceil(slices / (n/4))`.
+- **Chain ids:** block `[start, start + chains)` with `start = min(0xC0, (0xF0 - chains) / 0x10 * 0x10)`: C0 up to 48 chains, then B0, A0, 90, 80, 70 (128 slices at 4 phrases per chain starts at 70). There is no shifting for used ids: a used chain id in the block aborts with a `--force` hint. A used phrase P (content or referenced by a chain) aborts the same way. "Used" chain = non-empty or referenced by a song cell; "used" phrase = non-empty or referenced by a chain step.
+- **Empty id E** (default FE): phrase E must be empty, chain E must be silent (every step is phrase E or empty; an existing `[E, E, E, E]` chain is accepted and never touched). E must be below 0xFF and outside the chain block.
+- **Song view:** chains go on track 1, one song row per chain, starting 8 rows below the last used row across all tracks (row 0 on an empty song). Tracks 2 to 8 get chain E at the first reference row only. The rows must fit within 0x100.
+- **Overwriting:** chains, phrases and song cells that are not this tool's are never overwritten, even with `--force`. The input project is never overwritten, even with `--force` (same-file check on canonical paths). `--out` and the copied WAV are refused when they exist, unless `--force`.
+- **Instrument 7F already used:** error unless `--force`.
+
+## `--force`
+
+- **Previous insertion** (`previous.rs`): instrument 7F is a Sampler (any name), and chains are recognized in two layouts. Shared phrase layout: one or more `[P, E, E, E]` groups (zero transpose on the E steps) followed by empty steps, with phrase P playing the reference, whatever `--chain-phrases` was. Old layout: chain c is `[c, E, E, E]` and phrase c plays the reference. Phrase "plays the reference" = row 0 has a note on instrument 7F and all other rows are empty.
+- **Clearing:** those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row. Then it inserts fresh, normally at C0 and the same rows.
+- **Stray phrase:** if phrase P holds exactly one non-empty step and it is a note on instrument 7F, it is cleared even if no chain owns it, with a warning.
+- **Also with `--force`:** replaces a used instrument 7F, overwrites an existing copied WAV and an existing `--out`.
+- **Warnings** (printed to stderr): previous insertion replaced (with chain count), stray phrase overwritten, foreign instrument 7F replaced, existing `--out` overwritten.
+
+## File structure
+
+- `src/main.rs`: clap args, builds a `Request`, prints warnings and errors. No logic.
+- `src/lib.rs`: `Request`, `run`, constants `DEFAULT_EMPTY_ID`, `DEFAULT_PHRASE_ID`, `DEFAULT_CHAIN_PHRASES`, `MAX_SAMPLE_PATH_LEN`, file helpers, `slug`.
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
-- `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free`.
-- `src/previous.rs`: `PreviousInsertion`, `previous_insertion`, `clear_previous`.
-- `src/insert.rs`: `plan_layout`, `apply`.
-- `tests/fixtures/V6_6EMPTY.m8s`: copied from the crate repo `examples/songs/`.
-- `tests/e2e.rs`: end-to-end test via the library functions.
+- `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free` (chain ids only), constants `ID_LIMIT`, `DEFAULT_START`, `ALIGN`, `ROW_GAP`.
+- `src/insert.rs`: `Options { empty, phrase, chain_phrases }`, `Layout`, `blank_sampler`, `reference_slot_is_free`, `plan_layout`, `apply`, `REF_INSTRUMENT_SLOT`, `REFERENCE_NAME`, `MAX_SLICES`, `PHRASES_PER_SLICE`.
+- `src/previous.rs`: `PreviousInsertion { chains, phrases, stray_phrase }`, `previous_insertion`, `clear_previous`.
+- `assets/sampler.m8i`: sampler template.
+- `tests/fixtures/V6_6EMPTY.m8s`, `tests/fixtures/V6EMPTY.m8s`: from the crate repo; the FW 6.0 one only tests the version check.
+- `tests/roundtrip.rs`: `Song` read then write is byte identical.
+- `tests/e2e.rs`: `run` end to end on generated WAVs in temp dirs.
+- `README.md`, `LICENSE` (MIT).
 
-Make the crate a lib + bin (`src/lib.rs` re-exporting modules) so `tests/e2e.rs` can call it.
+## `run` order
 
----
+1. Refuse `--out` that is the input project; refuse an existing `--out` unless `--force`.
+2. Read and parse the project, parse the WAV, compute slices.
+3. Detect a previous insertion; note whether instrument 7F is used; with `--force` clear the previous insertion and stray phrase.
+4. `plan_layout` (version, slice count, chain phrases, ids, silent E, free chain block, free phrase P, rows).
+5. Error if 7F is used without `--force`; build the slug and sample path (length check); refuse an existing copied WAV unless `--force`.
+6. `apply` and serialize the song in memory.
+7. Only then create `--dest-dir`, write the WAV, write `--out`.
 
-### Task 1: Scaffold and API spike
+## Tests
 
-**Files:**
-- Create: `Cargo.toml`, `src/lib.rs`, `src/main.rs`, `tests/fixtures/V6_6EMPTY.m8s`, `tests/roundtrip.rs`
+- Unit tests in each module cover the behavior above, one concept per test, including boundaries: 48 and 49 chains, 128 slices, an exact row fit, 127 and 128 character sample paths.
+- E2E tests cover output files, input untouched, reruns with and without `--force`, packed layouts, custom phrase id, an unfinished manual attempt, foreign content refusals, existing file refusals.
+- A mutation check (breaking the chain transpose) was caught by exactly the matching test.
 
-**Interfaces:**
-- Produces: `fn blank_sampler(version: Version, name: &str, sample_path: &str) -> Sampler` in `src/insert.rs`, FWD play mode, slice 1.
+## Decisions and history
 
-- [ ] **Step 1: Scaffold.** `cargo init --name ref_inserter` in the project dir. Add deps via `cargo add clap --features derive` and `cargo add m8-file-parser --git https://github.com/Twinside/m8-file-parser` (then pin `rev` in Cargo.toml to the resolved commit). Copy `examples/songs/V6_6EMPTY.m8s` from the crate repo into `tests/fixtures/`.
-- [ ] **Step 2: Failing round-trip test.**
-
-```rust
-use m8_file_parser::{Song, Writer};
-
-#[test]
-fn song_roundtrip_is_byte_identical() {
-    let bytes = std::fs::read("tests/fixtures/V6_6EMPTY.m8s").unwrap();
-    let song = Song::read(&mut bytes.as_slice()).unwrap();
-    let mut w = Writer::new(bytes.clone());
-    song.write(&mut w).unwrap();
-    assert_eq!(w.finish(), bytes);
-}
-```
-
-- [ ] **Step 3:** `cargo test roundtrip`. Expected: PASS. If it fails, stop: the crate cannot patch-write this firmware; report the first differing offset to the user.
-- [ ] **Step 4: Sampler from template.** `Sampler`/`SynthParams` have no `Default`. The user exports one untouched FW 6.6 Sampler instrument from the M8 to `assets/sampler.m8i`. `blank_sampler` embeds it (`include_bytes!`), parses it with `Instrument::read`, errors if it is not a `Sampler`, then sets name, sample path, `play_mode = FWD`, `slice = 1`. Test asserts `play_mode == FWD`, `slice == 1`, `name == "REFERENCE"`, the path, and that `Instrument::Sampler(..).write` + re-read returns equal values.
-- [ ] **Step 5:** Run `cargo test`. Expected: PASS.
-
-### Task 2: WAV slicing
-
-**Files:**
-- Create: `src/wav.rs`
-- Test: inline `#[cfg(test)]` in `src/wav.rs`
-
-**Interfaces:**
-- Produces:
-  - `pub struct Wav { pub sample_rate: u32, pub block_align: u16, pub fmt: Vec<u8>, pub data: Vec<u8> }`
-  - `pub fn parse(bytes: &[u8]) -> Result<Wav, String>`: accepts RIFF/WAVE with `fmt ` format tag 1 (PCM) or 0xFFFE; ignores other chunks.
-  - `pub fn slice_frames(sample_rate: u32, bpm: f32) -> u32` = round(960 * sample_rate / bpm)
-  - `pub fn slice_count(wav: &Wav, slice_frames: u32) -> usize` = ceil(frames / slice_frames)
-  - `pub fn with_cue_points(wav: &Wav, slice_frames: u32, slices: usize) -> Vec<u8>`: RIFF with `fmt `, `data`, then `cue ` chunk with `slices` points, point k starts at frame k * slice_frames. Layout copied from DigiChain's M8-compatible writer (https://github.com/brian3kb/digichain/blob/main/src/resources.js): chunk size field = 4 + 24 * slices, then slice count u32, then 24 bytes per point: id u32 (k, 0-based), position u32 = 0, `data` fourcc, chunk_start u32 0, block_start u32 0, sample_offset u32 = start frame. `cue ` chunk goes after `data`.
-
-- [x] **Step 1: Verify the marker format.** Done: DigiChain documents "wav CUE point markers, compatible with DirtyWave M8 slice sampler" and its source gives the exact layout above. Not confirmed by Dirtywave docs or hardware; Task 5 step 5 is the proof.
-- [ ] **Step 2: Failing tests.**
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn wav_bytes(frames: u32) -> Vec<u8> {
-        let data_len = frames * 2;
-        let mut v = b"RIFF".to_vec();
-        v.extend((36 + data_len).to_le_bytes());
-        v.extend(b"WAVEfmt ");
-        v.extend(16u32.to_le_bytes());
-        v.extend([1, 0, 1, 0]);
-        v.extend(44100u32.to_le_bytes());
-        v.extend(88200u32.to_le_bytes());
-        v.extend([2, 0, 16, 0]);
-        v.extend(b"data");
-        v.extend(data_len.to_le_bytes());
-        v.extend(vec![0u8; data_len as usize]);
-        v
-    }
-
-    #[test]
-    fn slice_frames_at_120_bpm_is_8_seconds() {
-        assert_eq!(slice_frames(44100, 120.0), 352800);
-    }
-
-    #[test]
-    fn slice_count_counts_partial_tail() {
-        let wav = parse(&wav_bytes(352800 + 1)).unwrap();
-        assert_eq!(slice_count(&wav, 352800), 2);
-    }
-
-    #[test]
-    fn slice_count_exact_multiple_has_no_extra() {
-        let wav = parse(&wav_bytes(352800 * 2)).unwrap();
-        assert_eq!(slice_count(&wav, 352800), 2);
-    }
-
-    #[test]
-    fn cue_points_roundtrip_through_parse_and_land_at_slice_starts() {
-        let wav = parse(&wav_bytes(352800 * 2)).unwrap();
-        let out = with_cue_points(&wav, 352800, 2);
-        let cue = out.windows(4).position(|w| w == b"cue ").unwrap();
-        let count = u32::from_le_bytes(out[cue + 8..cue + 12].try_into().unwrap());
-        let second_start = u32::from_le_bytes(out[cue + 12 + 24 + 20..cue + 12 + 24 + 24].try_into().unwrap());
-        assert_eq!((count, second_start), (2, 352800));
-        assert_eq!(parse(&out).unwrap().data, wav.data);
-    }
-
-    #[test]
-    fn non_wav_is_rejected() {
-        assert!(parse(b"ID3 not a wav").is_err());
-    }
-}
-```
-
-- [ ] **Step 3:** `cargo test wav`. Expected: FAIL, functions undefined.
-- [ ] **Step 4: Implement** `parse` (walk chunks: 4-byte id, u32 LE size, pad to even), `slice_frames`, `slice_count` (`frames = data.len() / block_align`, integer ceil division), `with_cue_points` per the interfaces above. `Result<_, String>` errors name the problem ("not a RIFF/WAVE file", "not PCM", "missing fmt/data chunk").
-- [ ] **Step 5:** `cargo test wav`. Expected: PASS.
-
-### Task 3: Id and row allocation (done)
-
-**Files:**
-- Create: `src/alloc.rs` (code and tests live there)
-
-**Interfaces:**
-- Consumes: `m8_file_parser::{Chain, Phrase, Song, SongSteps}`
-- Produces:
-  - `pub const ID_LIMIT: usize = 0xF0; pub const DEFAULT_START: usize = 0xC0; pub const ALIGN: usize = 0x10; pub const ROW_GAP: usize = 8;`
-  - `pub struct UsedIds { pub chains: Vec<bool>, pub phrases: Vec<bool> }` (lens `Song::N_CHAINS`, `Song::N_PHRASES`)
-  - `pub fn used_ids(song: &Song) -> UsedIds`: chain used = non-empty or referenced by a song cell != 0xFF; phrase used = non-empty or referenced by a chain step != 0xFF.
-  - `pub fn block_start(block_size: usize) -> usize` = `min(0xC0, (0xF0 - block_size) / 0x10 * 0x10)`; `pub fn block_is_free(start: usize, block_size: usize, used: &UsedIds) -> bool`.
-  - `pub fn last_used_row(steps: &SongSteps) -> Option<usize>`: `None` for an empty song. Do not use `SongSteps::last_modified_row` (returns 256 for an empty song).
-
-Tests cover: `block_start` for small blocks, 48, 49 and 128 ids; `block_is_free` with a used chain or phrase in the block and a used id just past it; `used_ids` on the empty fixture and with content or references; `last_used_row` on empty and filled songs.
-
-### Task 4: Validate and apply to Song
-
-**Files:**
-- Create: `src/insert.rs` (extends Task 1's `blank_sampler`)
-- Test: inline `#[cfg(test)]` using `tests/fixtures/V6_6EMPTY.m8s`
-
-**Interfaces:**
-- Consumes: Task 3 helpers.
-- Produces:
-  - `#[derive(Debug, Clone, Copy, PartialEq)] pub struct SpecialIds { pub empty: u8, pub phrase: u8 }` and `#[derive(Debug, PartialEq)] pub struct Layout { pub start_id: usize, pub start_row: usize, pub slices: usize, pub ids: SpecialIds }`
-  - `pub fn plan_layout(song: &Song, slices: usize, ids: &SpecialIds) -> Result<Layout, String>`
-  - `pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), String>` (Err only when the sampler template is unusable)
-
-- [ ] **Step 1: Failing tests** on the fixture: (0) `V6EMPTY.m8s` (FW 6.0, read-only fixture copied for this test) returns Err mentioning FW 6.6, and the 6.6 fixture passes the check; (a) empty song, 3 slices, E=FE: layout `{start_id: 0xC0, start_row: 0, slices: 3}`; (b) slices = 129 returns Err mentioning 128; (c) slices = 0 returns Err; (d) instrument 7f non-empty returns Err; (e) chain FE non-empty returns Err; (f) phrase FE non-empty returns Err; (g) E = 0xC1 with block C0..C3 returns Err; (h) song with chain at row 255 returns Err (start_row + N > 0x100); (i) after `apply` on (a): `song.song.steps[0]` = 0xC0, `steps[1*8]` = 0xC1, `steps[2*8]` = 0xC2, `steps[1]` (track 2, row 0) = 0xFE, `steps[7]` = 0xFE, `steps[8 + 1]` (track 2, row 1) = 0xFF; `chains[0xC0].steps[0..4]` phrases = [0xC0, 0xFE, 0xFE, 0xFE], `steps[4].phrase == 0xFF`; `phrases[0xC1].steps[0].note == Note(1)` and `.instrument == 0x7F`, other steps of that phrase empty; `instruments[0x7F]` is a Sampler named `REFERENCE` with the given path; (j) song with last used row 4: start_row == 13.
-- [ ] **Step 2:** `cargo test insert`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `plan_layout` checks in this order (block start via `block_start`, abort with a `--force` hint when `block_is_free` is false instead of picking another start): `song.version.major == 6 && song.version.minor == 6` else Err("only FW 6.6 projects are supported, found X.Y"), slices in 1..=128, chain E silent (every step phrase E or 0xFF) and phrase E empty (`Phrase::is_empty`), `pick_start` or Err("no free block of N chain+phrase ids below 0xF0"), E not in block, `start_row = last_used_row.map_or(0, |r| r + 1 + ROW_GAP)`, `start_row + slices <= SongSteps::ROW_COUNT`. `apply`: set `instruments[0x7F] = Instrument::Sampler(blank_sampler(...))`; for k in 0..slices set phrase `start_id + k` step 0 to `Step { note: Note(k as u8), velocity: 0xFF (unset, as the crate marks an empty velocity; `Step::default()` would give 0), instrument: 0x7F, ..Default::default() }`, set chain `start_id + k` steps 0..4 phrases to `[start_id + k, E, E, E]` with E = `layout.empty_id`; set `steps[(start_row + k) * 8] = (start_id + k) as u8`; for tracks 1..8 set `steps[start_row * 8 + t] = E`. Also error when `empty_id >= Song::N_CHAINS` (0xFF is the empty-cell marker). Build with iterator `for_each`/`map`, no mutable counters.
-- [ ] **Step 4:** `cargo test insert`. Expected: PASS.
-
-### Task 5: CLI and end-to-end
-
-**Files:**
-- Create/Modify: `src/main.rs`, `src/lib.rs`
-- Test: `tests/e2e.rs`
-
-**Interfaces:**
-- Consumes: Tasks 2 to 4.
-- Produces: `pub struct Request { pub project: PathBuf, pub reference_wav: PathBuf, pub dest_dir: PathBuf, pub m8_dir: String, pub out: PathBuf, pub empty_id: u8 }` and `pub fn run(request: &Request) -> Result<Option<String>, String>` in `src/lib.rs` (`Some(warning)` when the id block is not at C0). `main` only parses args (`--empty-id` parsed as hex via `u8::from_str_radix`) and prints.
-
-- [ ] **Step 1: Failing e2e test** on the fixture plus a generated WAV (synthesised silence, sample_rate 44100, length 2.5 slices at the fixture's tempo; the generator lives in the test file): run into a temp dir, then assert (a) `out` exists, input bytes unchanged; (b) re-read `out` with `Song::read`: instrument 7f is a Sampler with path ending `.wav`, 3 chains at the expected ids; (c) the copied WAV in `dest_dir` parses, has a `cue ` chunk with 3 points; (d) a second run with a WAV of 129 slices returns Err and creates no files.
-- [ ] **Step 2:** `cargo test --test e2e`. Expected: FAIL.
-- [ ] **Step 3: Implement `run`** in order: read project bytes; `Song::read`; read + `parse` wav; `slice_frames(rate, song.tempo)`; `slice_count`; `plan_layout` (all validation before any write); sample path = `m8_dir/<stem>.wav`, Err when over 127 chars; `apply`; create `dest_dir`, write WAV with cue points; `Song::write` into `Writer::new(project_bytes.clone())`, write `out`. Warning string when `start_id != 0xC0`. Refuse to overwrite an existing `out` or an existing copied WAV (this also covers `out == project`). Everything is validated and the song serialized in memory before any file is written.
-- [ ] **Step 4:** `cargo test`. Expected: all PASS.
-- [ ] **Step 5: Manual check (user).** Load `--out` on a real M8 or the M8 headless/emulator: instrument 7f plays slice 1 on C-1, chains show at the expected rows, the WAV slices appear. This is the only proof the cue-chunk format matches the firmware.
-
----
+- Instrument 7F is not split across a second instrument; more than 128 slices is an error.
+- A used id aborts instead of shifting the block to B0, A0 and so on (earlier design).
+- The sampler comes from a template file because the crate has no `Default` for `Sampler` or `SynthParams`.
+- The M8 writes the `cue ` marker format DigiChain also writes; confirmed working on the user's M8.
+- The commit history uses the GitHub noreply address; the work email never reached the remote.
 
 ## Open items
 
-- **Cue chunk format** (Task 2, step 1) must be confirmed from the manual and on hardware.
-- **Empty-song start row** is 0 with no gap, assumed.
+- Packed layouts need an M8 check (see Hardware status).
+- Empty-song start row is 0 with no gap, an assumption nobody objected to.
+- The `Song::write` panic on files older than FW 6.5 is a crate bug and has not been reported upstream.
+- The sampler template's instrument file version header reads 6.0.2, while projects read 6.6.2. It loads fine on the M8.
