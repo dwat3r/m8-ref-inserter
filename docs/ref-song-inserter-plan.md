@@ -24,7 +24,7 @@
 - Phrase k (k = 0..N-1): row 0 = note k (C-1 = byte 0 = slice 1, +1 per semitone), instrument 7f. Chain k = [phrase k, E, E, E, rest 0xFF].
 - Song view: reference on track 1 (index 0). Start row = last used row across all tracks + 1 + 8 (empty song: row 0). Track 1 rows start_row..start_row+N get chain ids start..start+N. Tracks 2 to 8 get chain E at start_row only. Error if start_row + N > 0x100.
 - Never overwrite existing chains, phrases, song cells, instrument 7f.
-- WAV is copied to `<dest-dir>/<wav-stem>.wav`. Sample path stored in the instrument: `<m8-dir>/<wav-stem>.wav` (max 127 chars).
+- WAV is copied to `<dest-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)`. Sample path stored in the instrument: `<m8-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)` (max 127 chars).
 - Split files and 7e spill are out of scope (error at N > 128 instead).
 
 ## File Structure

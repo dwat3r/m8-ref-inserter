@@ -244,3 +244,29 @@ fn default_start_id_produces_no_warning() {
     let workspace = workspace(SLICES);
     assert_eq!(run_in(&workspace).unwrap(), None);
 }
+
+fn run_with_reference_named(workspace: &Workspace, file_name: &str) -> Result<Option<String>, String> {
+    let renamed = workspace.wav.with_file_name(file_name);
+    std::fs::rename(&workspace.wav, &renamed).unwrap();
+    run(&Request { reference_wav: renamed, ..request(workspace) })
+}
+
+#[test]
+fn copied_wav_name_is_an_ascii_slug() {
+    let workspace = workspace(SLICES);
+    run_with_reference_named(&workspace, "My Song, v2 \u{2060}final.wav").unwrap();
+    assert!(workspace.dest.join("My_Song_v2_final.wav").exists());
+}
+
+#[test]
+fn instrument_path_uses_the_slug() {
+    let workspace = workspace(SLICES);
+    run_with_reference_named(&workspace, "My Song, v2 \u{2060}final.wav").unwrap();
+    assert_eq!(reference_sampler(&workspace).sample_path, "/Samples/ref/My_Song_v2_final.wav");
+}
+
+#[test]
+fn reference_name_without_any_ascii_letters_or_digits_is_rejected() {
+    let workspace = workspace(SLICES);
+    assert!(run_with_reference_named(&workspace, "!!!.wav").is_err());
+}
