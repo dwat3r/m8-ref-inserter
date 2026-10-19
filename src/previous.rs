@@ -53,12 +53,17 @@ fn is_slice_group(group: &[ChainStep], options: &Options) -> bool {
             .all(|step| step.phrase == options.empty && step.transpose == 0)
 }
 
-fn is_shared_phrase_chain(song: &Song, id: usize, options: &Options) -> bool {
-    let steps = &song.chains[id].steps;
-    let groups = steps
+pub fn slice_groups(song: &Song, id: usize, options: &Options) -> usize {
+    song.chains[id]
+        .steps
         .chunks(PHRASES_PER_SLICE)
         .take_while(|group| is_slice_group(group, options))
-        .count();
+        .count()
+}
+
+fn is_shared_phrase_chain(song: &Song, id: usize, options: &Options) -> bool {
+    let steps = &song.chains[id].steps;
+    let groups = slice_groups(song, id, options);
     groups > 0
         && steps[groups * PHRASES_PER_SLICE..]
             .iter()
@@ -271,6 +276,23 @@ mod tests {
                 .chains
                 .contains(&DEFAULT_START)
         );
+    }
+
+    #[test]
+    fn slice_groups_counts_the_groups_of_a_full_packed_chain() {
+        let song = with_packed_reference();
+        assert_eq!(slice_groups(&song, DEFAULT_START, &OPTIONS), 2);
+    }
+
+    #[test]
+    fn slice_groups_counts_the_groups_of_a_partly_filled_chain() {
+        let song = with_packed_reference();
+        assert_eq!(slice_groups(&song, DEFAULT_START + 2, &OPTIONS), 1);
+    }
+
+    #[test]
+    fn slice_groups_is_zero_for_an_untouched_chain() {
+        assert_eq!(slice_groups(&fixture(), DEFAULT_START, &OPTIONS), 0);
     }
 
     #[test]

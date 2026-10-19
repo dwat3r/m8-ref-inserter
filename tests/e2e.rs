@@ -1,6 +1,9 @@
+mod common;
+
 use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step};
 use ref_inserter::alloc::DEFAULT_START;
-use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
+use ref_inserter::insert::{MAX_SLICES, Options, REF_INSTRUMENT_SLOT, blank_sampler};
+use ref_inserter::inspect::inspect;
 use ref_inserter::{
     DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Report,
     Request, run, wav,
@@ -27,19 +30,7 @@ struct Workspace {
 }
 
 fn wav_bytes(frames: u32) -> Vec<u8> {
-    let data_len = frames * 2;
-    let mut bytes = b"RIFF".to_vec();
-    bytes.extend((36 + data_len).to_le_bytes());
-    bytes.extend(b"WAVEfmt ");
-    bytes.extend(16u32.to_le_bytes());
-    bytes.extend([1, 0, 1, 0]);
-    bytes.extend(SAMPLE_RATE.to_le_bytes());
-    bytes.extend((SAMPLE_RATE * 2).to_le_bytes());
-    bytes.extend([2, 0, 16, 0]);
-    bytes.extend(b"data");
-    bytes.extend(data_len.to_le_bytes());
-    bytes.extend(vec![0u8; data_len as usize]);
-    bytes
+    common::wav_bytes(SAMPLE_RATE, frames)
 }
 
 fn fixture_song() -> Song {
@@ -834,4 +825,93 @@ fn summary_states_the_reference_length_in_minutes_and_seconds() {
     let seconds = (f64::from(frames_for_slices(SLICES)) / f64::from(SAMPLE_RATE)) as u64;
     let summary = summary_of(&request(&workspace));
     assert!(summary.contains(&format!("reference {}:{:02}", seconds / 60, seconds % 60)));
+}
+
+const INSPECT_OPTIONS: Options = Options {
+    empty: EMPTY_ID,
+    phrase: PHRASE_ID,
+    chain_phrases: DEFAULT_CHAIN_PHRASES,
+};
+
+fn inspect_text(project: &Path) -> String {
+    inspect(project, &INSPECT_OPTIONS).unwrap().join("\n")
+}
+
+#[test]
+fn inspect_reports_the_firmware_and_tempo() {
+    let workspace = workspace(SLICES);
+    let text = inspect_text(&workspace.project);
+    assert!(text.contains("FW 6.6") && text.contains(&format!("tempo {}", fixture_tempo())));
+}
+
+#[test]
+fn inspect_reports_an_empty_instrument_slot() {
+    let workspace = workspace(SLICES);
+    assert!(inspect_text(&workspace.project).contains("instrument 7F: empty"));
+}
+
+#[test]
+fn inspect_reports_no_previous_insertion_on_a_clean_project() {
+    let workspace = workspace(SLICES);
+    assert!(inspect_text(&workspace.project).contains("previous insertion: none"));
+}
+
+#[test]
+fn inspect_names_the_sampler_and_its_path() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let text = inspect_text(&workspace.out);
+    assert!(text.contains("\"REFERENCE\"") && text.contains("/Samples/ref/reference.wav"));
+}
+
+#[test]
+fn inspect_describes_a_previous_insertion() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let text = inspect_text(&workspace.out);
+    assert!(text.contains("3 chains (C0 to C2), 3 slices"));
+}
+
+#[test]
+fn inspect_reports_the_song_rows_of_a_previous_insertion() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    assert!(inspect_text(&workspace.out).contains("track 1 song rows 00 to 02"));
+}
+
+#[test]
+fn inspect_reports_the_shared_phrase_layout() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    assert!(inspect_text(&workspace.out).contains("shared phrase F0, 4 phrases per chain"));
+}
+
+#[test]
+fn inspect_reports_the_packing() {
+    let workspace = workspace(PACKED_SLICES);
+    run(&Request {
+        chain_phrases: PACKED_PHRASES,
+        ..request(&workspace)
+    })
+    .unwrap();
+    let text = inspect_text(&workspace.out);
+    assert!(text.contains("3 chains (C0 to C2), 5 slices") && text.contains("8 phrases per chain"));
+}
+
+#[test]
+fn inspect_reports_the_older_one_phrase_per_chain_layout() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    assert!(inspect_text(&workspace.project).contains("one phrase per chain (older layout)"));
+}
+
+#[test]
+fn inspect_reports_a_stray_phrase() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    assert!(inspect_text(&workspace.project).contains("stray phrase F0"));
+}
+
+#[test]
+fn inspect_rejects_a_missing_file() {
+    let workspace = workspace(SLICES);
+    assert!(inspect(&workspace.out, &INSPECT_OPTIONS).is_err());
 }

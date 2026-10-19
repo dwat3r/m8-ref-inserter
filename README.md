@@ -38,6 +38,14 @@ The tool prints a summary (slices, chain ids, song rows, slice length in seconds
 
 Copy the WAV and the new project to the M8's SD card.
 
+## Inspect
+
+```
+ref_inserter inspect <project.m8s> [--empty-id <hex>] [--phrase-id <hex>]
+```
+
+Prints the firmware and tempo, what instrument 7F holds, any previous reference insertion (chains, slices, song rows, layout, phrases per chain) and a stray shared phrase. It reads the project and writes nothing. Use it to see what `--force` would replace.
+
 ## Limits
 
 - FW 6.6 projects only.

@@ -1,5 +1,6 @@
 pub mod alloc;
 pub mod insert;
+pub mod inspect;
 pub mod previous;
 pub mod wav;
 
