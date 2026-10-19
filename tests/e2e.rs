@@ -87,6 +87,7 @@ fn request(workspace: &Workspace) -> Request {
         chain_phrases: DEFAULT_CHAIN_PHRASES,
         force: false,
         dry_run: false,
+        bpm: None,
     }
 }
 
@@ -759,4 +760,78 @@ fn dry_run_reuses_an_identical_wav_too() {
         ..request(&workspace)
     };
     assert!(run(&again).is_ok());
+}
+
+fn fixture_tempo() -> f32 {
+    fixture_song().tempo
+}
+
+fn with_bpm(bpm: f32) -> Request {
+    Request {
+        bpm: Some(bpm),
+        ..request(&workspace(SLICES))
+    }
+}
+
+#[test]
+fn bpm_override_changes_the_slice_count() {
+    let workspace = workspace(SLICES);
+    let doubled = fixture_tempo() * 2.0;
+    let expected = (frames_for_slices(SLICES) as usize)
+        .div_ceil(wav::slice_frames(SAMPLE_RATE, doubled) as usize);
+    let report = run(&Request {
+        bpm: Some(doubled),
+        ..request(&workspace)
+    })
+    .unwrap();
+    assert_eq!(report.slices, expected);
+}
+
+#[test]
+fn zero_bpm_is_rejected() {
+    assert!(run(&with_bpm(0.0)).is_err());
+}
+
+#[test]
+fn negative_bpm_is_rejected() {
+    assert!(run(&with_bpm(-120.0)).is_err());
+}
+
+#[test]
+fn non_finite_bpm_is_rejected() {
+    assert!(run(&with_bpm(f32::NAN)).is_err());
+}
+
+#[test]
+fn summary_states_the_slice_length_and_tempo() {
+    let workspace = workspace(SLICES);
+    let summary = summary_of(&request(&workspace));
+    assert!(summary.contains(&format!("16 beats at {} BPM", fixture_tempo())));
+}
+
+#[test]
+fn summary_shows_the_overridden_tempo() {
+    let workspace = workspace(SLICES);
+    let summary = summary_of(&Request {
+        bpm: Some(200.0),
+        ..request(&workspace)
+    });
+    assert!(summary.contains("16 beats at 200 BPM"));
+}
+
+#[test]
+fn summary_states_the_slice_length_in_seconds() {
+    let workspace = workspace(SLICES);
+    let seconds =
+        f64::from(wav::slice_frames(SAMPLE_RATE, fixture_tempo())) / f64::from(SAMPLE_RATE);
+    let summary = summary_of(&request(&workspace));
+    assert!(summary.contains(&format!("slice length {seconds:.2} s")));
+}
+
+#[test]
+fn summary_states_the_reference_length_in_minutes_and_seconds() {
+    let workspace = workspace(SLICES);
+    let seconds = (f64::from(frames_for_slices(SLICES)) / f64::from(SAMPLE_RATE)) as u64;
+    let summary = summary_of(&request(&workspace));
+    assert!(summary.contains(&format!("reference {}:{:02}", seconds / 60, seconds % 60)));
 }

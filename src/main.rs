@@ -38,6 +38,9 @@ struct Args {
     /// Validate and print what would change, without writing any file
     #[arg(long)]
     dry_run: bool,
+    /// Tempo of the reference, if it differs from the project tempo
+    #[arg(long)]
+    bpm: Option<f32>,
 }
 
 fn parse_hex_id(id: &str) -> Result<u8, ParseIntError> {
@@ -57,6 +60,7 @@ fn main() -> ExitCode {
         chain_phrases: args.chain_phrases.unwrap_or(DEFAULT_CHAIN_PHRASES),
         force: args.force,
         dry_run: args.dry_run,
+        bpm: args.bpm,
     };
     match run(&request) {
         Ok(report) => {

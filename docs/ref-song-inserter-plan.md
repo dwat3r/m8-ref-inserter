@@ -18,12 +18,12 @@ Status: built, tested (157 tests), pushed to https://github.com/dwat3r/m8-ref-in
 ```
 ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it> --out <new.m8s>
              [--empty-id <hex, default FE>] [--phrase-id <hex, default F0>]
-             [--chain-phrases <4|8|12|16, default 4>] [--force] [--dry-run]
+             [--chain-phrases <4|8|12|16, default 4>] [--force] [--dry-run] [--bpm <f32>]
 ```
 
 ## Behavior
 
-- **Input:** FW 6.6 projects only (error otherwise). The crate's `Song::write` panics on files older than 6.5. BPM comes from `Song.tempo`, the reference is trusted to match and starts at beat 1. PCM WAV only.
+- **Input:** FW 6.6 projects only (error otherwise). The crate's `Song::write` panics on files older than 6.5. BPM comes from `Song.tempo` unless `--bpm` is given (must be finite and positive, else error). The reference is trusted to match and starts at beat 1. A length-based tempo check was rejected: real tracks have silence and tails, so their length is never reliably a whole number of slices. Instead the summary states the slice length in seconds, the tempo used and the reference length so a wrong tempo is visible. PCM WAV only.
 - **Slices:** length 16 beats = `round(960 * sample_rate / bpm)` frames. Count = `ceil(frames / slice_frames)`, the partial tail is a slice. 0 slices or more than 128 is an error.
 - **Output WAV:** copied to `<dest-dir>/<slug>.wav` with a `cue ` chunk, one point per slice. `slug` is the WAV file stem with each run of characters outside `[A-Za-z0-9_-]` replaced by one `_`, trimmed of leading and trailing `_` (error if empty). The instrument stores `<m8-dir>/<slug>.wav` (max 127 characters).
 - **Cue chunk** (layout from DigiChain's M8-compatible writer): size field `4 + 24 * slices`, slice count, then per point 24 bytes: id (0-based), position 0, `data`, chunk start 0, block start 0, sample offset = start frame. The chunk follows `data`.

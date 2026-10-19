@@ -25,6 +25,7 @@ pub struct Request {
     pub chain_phrases: usize,
     pub force: bool,
     pub dry_run: bool,
+    pub bpm: Option<f32>,
 }
 
 #[derive(Debug)]
@@ -40,6 +41,9 @@ pub struct Report {
     pub out: PathBuf,
     pub dry_run: bool,
     pub reused_wav: bool,
+    pub bpm: f32,
+    pub slice_seconds: f64,
+    pub reference_seconds: f64,
 }
 
 impl Report {
@@ -55,6 +59,14 @@ impl Report {
             format!(
                 "{} slices in {} chains ({:02X} to {:02X}) on track 1, song rows {:02X} to {:02X}",
                 self.slices, self.chains, self.first_chain, last_chain, self.first_row, last_row
+            ),
+            format!(
+                "slice length {:.2} s ({} beats at {} BPM), reference {}:{:02}",
+                self.slice_seconds,
+                wav::BEATS_PER_SLICE,
+                self.bpm,
+                self.reference_seconds as u64 / 60,
+                self.reference_seconds as u64 % 60
             ),
             format!(
                 "shared phrase {:02X}, instrument {REF_INSTRUMENT_SLOT:02X} plays {}",
@@ -127,7 +139,11 @@ pub fn run(request: &Request) -> Result<Report, String> {
     let mut song = Song::read(&mut project_bytes.as_slice())
         .map_err(|e| format!("cannot parse {}: {e:?}", request.project.display()))?;
     let reference = wav::parse(&read_file(&request.reference_wav)?)?;
-    let slice_frames = wav::slice_frames(reference.sample_rate, song.tempo);
+    let bpm = request.bpm.unwrap_or(song.tempo);
+    if !bpm.is_finite() || bpm <= 0.0 {
+        return Err(format!("bpm must be a positive number, got {bpm}"));
+    }
+    let slice_frames = wav::slice_frames(reference.sample_rate, bpm);
     let slices = wav::slice_count(&reference, slice_frames);
     let options = Options {
         empty: request.empty_id,
@@ -218,6 +234,9 @@ pub fn run(request: &Request) -> Result<Report, String> {
         out: request.out.clone(),
         dry_run: request.dry_run,
         reused_wav: reuses_wav,
+        bpm,
+        slice_seconds: f64::from(slice_frames) / f64::from(reference.sample_rate),
+        reference_seconds: reference.frames() as f64 / f64::from(reference.sample_rate),
     })
 }
 

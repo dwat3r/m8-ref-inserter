@@ -1,6 +1,6 @@
 const FORMAT_PCM: u16 = 1;
 const FORMAT_EXTENSIBLE: u16 = 0xFFFE;
-const BEATS_PER_SLICE: f64 = 16.0;
+pub const BEATS_PER_SLICE: f64 = 16.0;
 const SECONDS_PER_MINUTE: f64 = 60.0;
 const RIFF_HEADER_SIZE: usize = 12;
 const CHUNK_HEADER_SIZE: usize = 8;
@@ -64,9 +64,14 @@ pub fn slice_frames(sample_rate: u32, bpm: f32) -> u32 {
     (BEATS_PER_SLICE * SECONDS_PER_MINUTE * f64::from(sample_rate) / f64::from(bpm)).round() as u32
 }
 
+impl Wav {
+    pub fn frames(&self) -> usize {
+        self.data.len() / usize::from(self.block_align)
+    }
+}
+
 pub fn slice_count(wav: &Wav, slice_frames: u32) -> usize {
-    let frames = wav.data.len() / usize::from(wav.block_align);
-    frames.div_ceil(slice_frames as usize)
+    wav.frames().div_ceil(slice_frames as usize)
 }
 
 fn chunk(id: &[u8; 4], payload: &[u8]) -> Vec<u8> {
@@ -163,6 +168,11 @@ mod tests {
     fn slice_count_of_exact_multiple_has_no_extra_slice() {
         let wav = parse(&wav_bytes(SLICE_FRAMES * 2)).unwrap();
         assert_eq!(slice_count(&wav, SLICE_FRAMES), 2);
+    }
+
+    #[test]
+    fn frames_counts_whole_sample_frames() {
+        assert_eq!(parse(&wav_bytes(10)).unwrap().frames(), 10);
     }
 
     #[test]
