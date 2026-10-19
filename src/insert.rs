@@ -2,10 +2,10 @@ use crate::alloc::{ID_LIMIT, ROW_GAP, last_used_row, pick_start, used_ids};
 use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version};
 
 const SAMPLER_TEMPLATE: &[u8] = include_bytes!("../assets/sampler.m8i");
-const REF_INSTRUMENT_SLOT: u8 = 0x7F;
+pub const REF_INSTRUMENT_SLOT: u8 = 0x7F;
 const FIRST_SLICE: u8 = 1;
 const SUPPORTED_FIRMWARE: (u8, u8) = (6, 6);
-const MAX_SLICES: usize = 128;
+pub const MAX_SLICES: usize = 128;
 const UNSET_VELOCITY: u8 = 0xFF;
 
 #[derive(Debug, PartialEq)]

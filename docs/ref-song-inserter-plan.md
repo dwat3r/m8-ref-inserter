@@ -188,11 +188,11 @@ Tests cover: start at C0 for small blocks and for 48 ids, B0 for 49, 0x70 for 12
 
 **Interfaces:**
 - Consumes: Tasks 2 to 4.
-- Produces: `pub fn run(project: &Path, wav: &Path, dest_dir: &Path, m8_dir: &str, out: &Path, empty_id: u8) -> Result<String, String>` in `src/lib.rs` (returns warning text, may be empty). `main` only parses args (`--empty-id` parsed as hex via `u8::from_str_radix`) and prints.
+- Produces: `pub struct Request { pub project: PathBuf, pub reference_wav: PathBuf, pub dest_dir: PathBuf, pub m8_dir: String, pub out: PathBuf, pub empty_id: u8 }` and `pub fn run(request: &Request) -> Result<Option<String>, String>` in `src/lib.rs` (`Some(warning)` when the id block is not at C0). `main` only parses args (`--empty-id` parsed as hex via `u8::from_str_radix`) and prints.
 
 - [ ] **Step 1: Failing e2e test** on the fixture plus a generated WAV (synthesised silence, sample_rate 44100, length 2.5 slices at the fixture's tempo; the generator lives in the test file): run into a temp dir, then assert (a) `out` exists, input bytes unchanged; (b) re-read `out` with `Song::read`: instrument 7f is a Sampler with path ending `_1.wav`, 3 chains at the expected ids; (c) the copied WAV in `dest_dir` parses, has a `cue ` chunk with 3 points; (d) a second run with a WAV of 129 slices returns Err and creates no files.
 - [ ] **Step 2:** `cargo test --test e2e`. Expected: FAIL.
-- [ ] **Step 3: Implement `run`** in order: read project bytes; `Song::read`; read + `parse` wav; `slice_frames(rate, song.tempo)`; `slice_count`; `plan_layout` (all validation before any write); sample path = `m8_dir/<stem>_1.wav`, Err when over 127 chars; `apply`; create `dest_dir`, write WAV with cue points; `Song::write` into `Writer::new(project_bytes.clone())`, write `out`. Warning string when `start_id != 0xC0`. Refuse `out == project`.
+- [ ] **Step 3: Implement `run`** in order: read project bytes; `Song::read`; read + `parse` wav; `slice_frames(rate, song.tempo)`; `slice_count`; `plan_layout` (all validation before any write); sample path = `m8_dir/<stem>_1.wav`, Err when over 127 chars; `apply`; create `dest_dir`, write WAV with cue points; `Song::write` into `Writer::new(project_bytes.clone())`, write `out`. Warning string when `start_id != 0xC0`. Refuse to overwrite an existing `out` or an existing copied WAV (this also covers `out == project`). Everything is validated and the song serialized in memory before any file is written.
 - [ ] **Step 4:** `cargo test`. Expected: all PASS.
 - [ ] **Step 5: Manual check (user).** Load `--out` on a real M8 or the M8 headless/emulator: instrument 7f plays slice 1 on C-1, chains show at the expected rows, the WAV slices appear. This is the only proof the cue-chunk format matches the firmware.
 

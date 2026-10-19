@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 m8-file-parser = { git = "https://github.com/Twinside/m8-file-parser", rev = "08d68bc706739e8e772596d2cae98047fd28359a" }
+
+[dev-dependencies]
+tempfile = "3.27.0"
