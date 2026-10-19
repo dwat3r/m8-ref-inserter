@@ -32,7 +32,7 @@
 - `Cargo.toml`: deps.
 - `src/main.rs`: args, IO, orchestration. No logic.
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
-- `src/alloc.rs`: `used_chains`, `used_phrases`, `last_used_row`, `pick_start`.
+- `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `pick_start`.
 - `src/insert.rs`: `plan_layout`, `apply`.
 - `tests/fixtures/V6_6EMPTY.m8s`: copied from the crate repo `examples/songs/`.
 - `tests/e2e.rs`: end-to-end test via the library functions.
@@ -146,98 +146,21 @@ mod tests {
 - [ ] **Step 4: Implement** `parse` (walk chunks: 4-byte id, u32 LE size, pad to even), `slice_frames`, `slice_count` (`frames = data.len() / block_align`, integer ceil division), `with_cue_points` per the interfaces above. `Result<_, String>` errors name the problem ("not a RIFF/WAVE file", "not PCM", "missing fmt/data chunk").
 - [ ] **Step 5:** `cargo test wav`. Expected: PASS.
 
-### Task 3: Id and row allocation
+### Task 3: Id and row allocation (done)
 
 **Files:**
-- Create: `src/alloc.rs`
-- Test: inline `#[cfg(test)]`
+- Create: `src/alloc.rs` (code and tests live there)
 
 **Interfaces:**
-- Consumes: `m8_file_parser::{Song, SongSteps}`
+- Consumes: `m8_file_parser::{Chain, Phrase, Song, SongSteps}`
 - Produces:
   - `pub const ID_LIMIT: usize = 0xF0; pub const DEFAULT_START: usize = 0xC0; pub const ALIGN: usize = 0x10; pub const ROW_GAP: usize = 8;`
-  - `pub fn used_chains(song: &Song) -> Vec<bool>` (len `Song::N_CHAINS`)
-  - `pub fn used_phrases(song: &Song) -> Vec<bool>` (len `Song::N_PHRASES`)
-  - `pub fn last_used_row(steps: &SongSteps) -> Option<usize>`
-  - `pub fn pick_start(n: usize, used_chains: &[bool], used_phrases: &[bool]) -> Option<usize>`
+  - `pub struct UsedIds { pub chains: Vec<bool>, pub phrases: Vec<bool> }` (lens `Song::N_CHAINS`, `Song::N_PHRASES`)
+  - `pub fn used_ids(song: &Song) -> UsedIds`: chain used = non-empty or referenced by a song cell != 0xFF; phrase used = non-empty or referenced by a chain step != 0xFF.
+  - `pub fn pick_start(block_size: usize, used: &UsedIds) -> Option<usize>`: first candidate of `min(0xC0, (0xF0 - block_size) / 0x10 * 0x10)` stepping down by 0x10 to 0x00 whose block `[start, start + block_size)` has no used chain or phrase id.
+  - `pub fn last_used_row(steps: &SongSteps) -> Option<usize>`: `None` for an empty song. Do not use `SongSteps::last_modified_row` (returns 256 for an empty song).
 
-- [ ] **Step 1: Failing tests** (pure helpers take plain slices, so no `Song` fixture needed for the pick logic):
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn none_used() -> Vec<bool> { vec![false; 255] }
-
-    #[test]
-    fn small_block_starts_at_c0() {
-        assert_eq!(pick_start(10, &none_used(), &none_used()), Some(0xC0));
-    }
-
-    #[test]
-    fn block_of_48_still_starts_at_c0() {
-        assert_eq!(pick_start(48, &none_used(), &none_used()), Some(0xC0));
-    }
-
-    #[test]
-    fn block_of_49_starts_at_b0() {
-        assert_eq!(pick_start(49, &none_used(), &none_used()), Some(0xB0));
-    }
-
-    #[test]
-    fn used_chain_in_block_shifts_down_one_step() {
-        let mut chains = none_used();
-        chains[0xC5] = true;
-        assert_eq!(pick_start(10, &chains, &none_used()), Some(0xB0));
-    }
-
-    #[test]
-    fn used_phrase_in_block_shifts_down_one_step() {
-        let mut phrases = none_used();
-        phrases[0xC0] = true;
-        assert_eq!(pick_start(10, &none_used(), &phrases), Some(0xB0));
-    }
-
-    #[test]
-    fn max_128_slices_start_at_70() {
-        assert_eq!(pick_start(128, &none_used(), &none_used()), Some(0x70));
-    }
-
-    #[test]
-    fn everything_used_yields_none() {
-        assert_eq!(pick_start(1, &vec![true; 255], &none_used()), None);
-    }
-}
-```
-
-Also add tests for `last_used_row` using a `SongSteps` built by `Song::read` of the fixture then setting `steps[row * 8 + track] = chain`: empty song -> `None`; a chain at row 3 track 5 -> `Some(3)`.
-
-- [ ] **Step 2:** `cargo test alloc`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-
-```rust
-pub fn candidate_starts(n: usize) -> Vec<usize> {
-    let first = DEFAULT_START.min((ID_LIMIT - n) / ALIGN * ALIGN);
-    (0..=first / ALIGN).rev().map(|i| i * ALIGN).collect()
-}
-
-pub fn pick_start(n: usize, used_chains: &[bool], used_phrases: &[bool]) -> Option<usize> {
-    candidate_starts(n)
-        .into_iter()
-        .find(|&s| (s..s + n).all(|i| !used_chains[i] && !used_phrases[i]))
-}
-
-pub fn last_used_row(steps: &SongSteps) -> Option<usize> {
-    steps
-        .steps
-        .chunks(SongSteps::TRACK_COUNT)
-        .rposition(|row| row.iter().any(|&c| c != 0xFF))
-}
-```
-
-`used_chains`: `referenced` = set of song cells != 0xFF; chain i used = `!song.chains[i].is_empty() || referenced.contains(&(i as u8))`. `used_phrases`: `referenced` = every `ChainStep.phrase != 0xFF` across all chains; same shape. Do not use `SongSteps::last_modified_row` (returns 256 for an empty song).
-- [ ] **Step 4:** `cargo test alloc`. Expected: PASS.
+Tests cover: start at C0 for small blocks and for 48 ids, B0 for 49, 0x70 for 128, a used chain or phrase in the block shifting down one step, a used id just past the block not shifting, everything used giving `None`, `used_ids` on the empty fixture and with content or references, `last_used_row` on empty and filled songs.
 
 ### Task 4: Validate and apply to Song
 
