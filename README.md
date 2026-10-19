@@ -23,7 +23,7 @@ cargo run --release -- <project.m8s> <reference.wav> \
 | `--m8-dir` | Same directory as the M8 sees it, stored in the instrument |
 | `--out` | New project file to write |
 | `--empty-id` | Hex id of the empty chain and phrase (default `FE`) |
-| `--force` | Replace a previous insertion of the reference, or an already used instrument 7F |
+| `--force` | Replace a previous insertion, an already used instrument 7F, and existing `--out` and copied WAV files |
 
 Copy the WAV and the new project to the M8's SD card.
 
@@ -35,7 +35,7 @@ Copy the WAV and the new project to the M8's SD card.
 - Phrase `--empty-id` must be empty. Its chain must be empty or hold only that phrase.
 - Running it on its own output aborts. `--force` removes the previous insertion (found by its pattern: sampler `REFERENCE`, chains `[c, FE, FE, FE]`) and inserts again, overwriting the old copied WAV.
 - Anything else using the C0 ids aborts, even with `--force`.
-- Never overwrites an existing `--out` file, and never overwrites the copied WAV without `--force`.
+- Never overwrites an existing `--out` file or copied WAV without `--force`. The input project is never overwritten, even with `--force`.
 - The sample name is slugged to ASCII (`[A-Za-z0-9_-]`).
 
 ## Credits

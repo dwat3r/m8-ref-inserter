@@ -43,6 +43,10 @@ fn slug(stem: &str) -> String {
         .to_string()
 }
 
+fn is_same_file(first: &Path, second: &Path) -> bool {
+    matches!((first.canonicalize(), second.canonicalize()), (Ok(a), Ok(b)) if a == b)
+}
+
 fn refuse_existing(path: &Path) -> Result<(), String> {
     if path.exists() {
         return Err(format!("{} already exists, refusing to overwrite", path.display()));
@@ -51,7 +55,13 @@ fn refuse_existing(path: &Path) -> Result<(), String> {
 }
 
 pub fn run(request: &Request) -> Result<Vec<String>, String> {
-    refuse_existing(&request.out)?;
+    if is_same_file(&request.project, &request.out) {
+        return Err(format!("{} is the input project, refusing to overwrite it", request.out.display()));
+    }
+    if !request.force {
+        refuse_existing(&request.out)?;
+    }
+    let overwrites_output = request.out.exists();
     let project_bytes = read_file(&request.project)?;
     let mut song = Song::read(&mut project_bytes.as_slice())
         .map_err(|e| format!("cannot parse {}: {e:?}", request.project.display()))?;
@@ -105,7 +115,9 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     });
     let instrument_warning = (replaces_instrument && previous.is_empty())
         .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
-    Ok([previous_warning, instrument_warning].into_iter().flatten().collect())
+    let output_warning = overwrites_output
+        .then(|| format!("warning: overwrote existing {}", request.out.display()));
+    Ok([previous_warning, instrument_warning, output_warning].into_iter().flatten().collect())
 }
 
 #[cfg(test)]

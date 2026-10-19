@@ -211,6 +211,36 @@ fn existing_output_is_not_overwritten() {
 }
 
 #[test]
+fn existing_output_is_overwritten_with_force() {
+    let workspace = workspace(SLICES);
+    std::fs::write(&workspace.out, b"replace me").unwrap();
+    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert_eq!(read_out(&workspace).tempo, fixture_song().tempo);
+}
+
+#[test]
+fn overwriting_an_existing_output_produces_a_warning() {
+    let workspace = workspace(SLICES);
+    std::fs::write(&workspace.out, b"replace me").unwrap();
+    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("overwrote")));
+}
+
+#[test]
+fn output_equal_to_input_is_rejected_even_with_force() {
+    let workspace = workspace(SLICES);
+    let result = run(&Request { out: workspace.project.clone(), force: true, ..request(&workspace) });
+    assert!(result.is_err());
+}
+
+#[test]
+fn input_project_is_unchanged_when_output_equals_it_with_force() {
+    let workspace = workspace(SLICES);
+    run(&Request { out: workspace.project.clone(), force: true, ..request(&workspace) }).unwrap_err();
+    assert_eq!(std::fs::read(&workspace.project).unwrap(), std::fs::read(PROJECT_FIXTURE).unwrap());
+}
+
+#[test]
 fn output_equal_to_input_is_rejected() {
     let workspace = workspace(SLICES);
     let result = run(&Request { out: workspace.project.clone(), ..request(&workspace) });

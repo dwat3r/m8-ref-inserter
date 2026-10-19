@@ -23,7 +23,7 @@ struct Args {
     /// Hex id of the empty chain and phrase (default FE)
     #[arg(long, value_parser = parse_hex_id)]
     empty_id: Option<u8>,
-    /// Replace a previous insertion of the reference, or any already used instrument 7F
+    /// Replace a previous insertion, a used instrument 7F, and existing output files
     #[arg(long)]
     force: bool,
 }
