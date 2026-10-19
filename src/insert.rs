@@ -1,5 +1,5 @@
 use crate::alloc::{ID_LIMIT, ROW_GAP, last_used_row, pick_start, used_ids};
-use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version};
+use m8_file_parser::{Chain, Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version};
 
 const SAMPLER_TEMPLATE: &[u8] = include_bytes!("../assets/sampler.m8i");
 pub const REF_INSTRUMENT_SLOT: u8 = 0x7F;
@@ -7,6 +7,7 @@ const FIRST_SLICE: u8 = 1;
 const SUPPORTED_FIRMWARE: (u8, u8) = (6, 6);
 pub const MAX_SLICES: usize = 128;
 const UNSET_VELOCITY: u8 = 0xFF;
+const EMPTY_PHRASE_CELL: u8 = 0xFF;
 
 #[derive(Debug, PartialEq)]
 pub struct Layout {
@@ -31,6 +32,13 @@ pub fn blank_sampler(sample_path: &str) -> Result<Sampler, String> {
     }
 }
 
+fn is_silent_chain(chain: &Chain, empty_id: u8) -> bool {
+    chain
+        .steps
+        .iter()
+        .all(|step| step.phrase == empty_id || step.phrase == EMPTY_PHRASE_CELL)
+}
+
 pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, String> {
     let Version { major, minor, .. } = song.version;
     if (major, minor) != SUPPORTED_FIRMWARE {
@@ -46,8 +54,8 @@ pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, S
     if empty >= Song::N_CHAINS {
         return Err(format!("empty id {empty_id:02X} is out of range"));
     }
-    if !song.chains[empty].is_empty() || !song.phrases[empty].is_empty() {
-        return Err(format!("chain or phrase {empty_id:02X} is not empty"));
+    if !is_silent_chain(&song.chains[empty], empty_id) || !song.phrases[empty].is_empty() {
+        return Err(format!("chain {empty_id:02X} is not silent or phrase {empty_id:02X} is not empty"));
     }
     let start_id = pick_start(slices, &used_ids(song))
         .ok_or(format!("no free block of {slices} chain and phrase ids below {ID_LIMIT:02X}"))?;
@@ -124,6 +132,14 @@ mod tests {
         song
     }
 
+    fn silent_chain_song() -> Song {
+        let mut song = empty_song();
+        song.chains[usize::from(EMPTY_ID)].steps[..SLICE_CHAIN_LEN]
+            .iter_mut()
+            .for_each(|step| step.phrase = EMPTY_ID);
+        song
+    }
+
     fn song_cell(song: &Song, row: usize, track: usize) -> u8 {
         song.song.steps[row * TRACKS + track]
     }
@@ -167,10 +183,24 @@ mod tests {
     }
 
     #[test]
-    fn non_empty_empty_chain_is_rejected() {
+    fn chain_with_an_audible_phrase_is_rejected() {
         let mut song = empty_song();
         song.chains[usize::from(EMPTY_ID)].steps[0].phrase = ANY_PHRASE;
         assert!(plan_layout(&song, SLICES, EMPTY_ID).is_err());
+    }
+
+    #[test]
+    fn chain_of_only_empty_phrases_is_accepted() {
+        assert!(plan_layout(&silent_chain_song(), SLICES, EMPTY_ID).is_ok());
+    }
+
+    #[test]
+    fn silent_chain_is_left_untouched_by_apply() {
+        let mut song = silent_chain_song();
+        let before = song.chains[usize::from(EMPTY_ID)].clone();
+        let layout = plan_layout(&song, SLICES, EMPTY_ID).unwrap();
+        apply(&mut song, &layout, PATH).unwrap();
+        assert_eq!(song.chains[usize::from(EMPTY_ID)], before);
     }
 
     #[test]
