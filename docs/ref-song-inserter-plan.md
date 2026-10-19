@@ -57,6 +57,7 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - `tests/roundtrip.rs`: `Song` read then write is byte identical.
 - `tests/e2e.rs`: `run` end to end on generated WAVs in temp dirs.
 - `README.md`, `LICENSE` (MIT).
+- `.github/workflows/ci.yml`: on push and pull request to `master`, and on `v*` tags. Matrix: macOS arm64 (tests, build), macOS x86_64 (cross-compiled on the arm64 runner, build only, to avoid paid Intel runners), Linux x86_64 and Windows x86_64 (tests, build). Each job packages `ref_inserter-<target>.tar.gz` (binary, README, LICENSE) as a workflow artifact; a tag push also creates a GitHub Release with `gh release create` and attaches the archives.
 
 ## `run` order
 
@@ -86,5 +87,6 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 
 - Packed layouts need an M8 check (see Hardware status).
 - Empty-song start row is 0 with no gap, an assumption nobody objected to.
+- The CI workflow has not run yet: the Windows and Linux test runs and the Intel macOS cross-build are unverified until the first run (locally only the arm64 commands were run).
 - The `Song::write` panic on files older than FW 6.5 is a crate bug and has not been reported upstream.
 - The sampler template's instrument file version header reads 6.0.2, while projects read 6.6.2. It loads fine on the M8.

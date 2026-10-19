@@ -11,6 +11,10 @@ Insert a reference song into a Dirtywave M8 project, sliced into chains for A/B 
 - Chains go on track 1, 8 rows below the last used song row. Tracks 2 to 8 get the empty chain at the first row, so they stay silent.
 - Never touches existing chains, phrases or song cells. The input project is never modified.
 
+## Binaries
+
+Prebuilt binaries for macOS (Apple silicon and Intel), Linux x86_64 and Windows x86_64 are attached to each [GitHub release](https://github.com/dwat3r/m8-ref-inserter/releases) as `ref_inserter-<target>.tar.gz`. CI also uploads them as workflow artifacts on every push.
+
 ## Usage
 
 ```
