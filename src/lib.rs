@@ -3,7 +3,7 @@ pub mod insert;
 pub mod wav;
 
 use alloc::DEFAULT_START;
-use insert::{apply, plan_layout};
+use insert::{REF_INSTRUMENT_SLOT, apply, plan_layout, reference_slot_is_free};
 use m8_file_parser::Song;
 use m8_file_parser::writer::Writer;
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ pub struct Request {
     pub m8_dir: String,
     pub out: PathBuf,
     pub empty_id: u8,
+    pub force: bool,
 }
 
 fn read_file(path: &Path) -> Result<Vec<u8>, String> {
@@ -48,7 +49,7 @@ fn refuse_existing(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn run(request: &Request) -> Result<Option<String>, String> {
+pub fn run(request: &Request) -> Result<Vec<String>, String> {
     refuse_existing(&request.out)?;
     let project_bytes = read_file(&request.project)?;
     let mut song = Song::read(&mut project_bytes.as_slice())
@@ -57,6 +58,12 @@ pub fn run(request: &Request) -> Result<Option<String>, String> {
     let slice_frames = wav::slice_frames(reference.sample_rate, song.tempo);
     let slices = wav::slice_count(&reference, slice_frames);
     let layout = plan_layout(&song, slices, request.empty_id)?;
+    let replaces_instrument = !reference_slot_is_free(&song);
+    if replaces_instrument && !request.force {
+        return Err(format!(
+            "instrument {REF_INSTRUMENT_SLOT:02X} is already used, pass --force to replace it"
+        ));
+    }
 
     let stem = request
         .reference_wav
@@ -86,12 +93,15 @@ pub fn run(request: &Request) -> Result<Option<String>, String> {
     write_file(&copied_wav, &wav::with_cue_points(&reference, slice_frames, slices))?;
     write_file(&request.out, &writer.finish())?;
 
-    Ok((layout.start_id != DEFAULT_START).then(|| {
+    let instrument_warning = replaces_instrument
+        .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
+    let ids_warning = (layout.start_id != DEFAULT_START).then(|| {
         format!(
             "warning: reference ids start at {:02X} instead of {DEFAULT_START:02X}, that block is in use",
             layout.start_id
         )
-    }))
+    });
+    Ok([ids_warning, instrument_warning].into_iter().flatten().collect())
 }
 
 #[cfg(test)]

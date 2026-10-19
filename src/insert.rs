@@ -39,6 +39,10 @@ fn is_silent_chain(chain: &Chain, empty_id: u8) -> bool {
         .all(|step| step.phrase == empty_id || step.phrase == EMPTY_PHRASE_CELL)
 }
 
+pub fn reference_slot_is_free(song: &Song) -> bool {
+    song.instruments[usize::from(REF_INSTRUMENT_SLOT)].is_empty()
+}
+
 pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, String> {
     let Version { major, minor, .. } = song.version;
     if (major, minor) != SUPPORTED_FIRMWARE {
@@ -46,9 +50,6 @@ pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, S
     }
     if !(1..=MAX_SLICES).contains(&slices) {
         return Err(format!("reference needs {slices} slices, supported range is 1 to {MAX_SLICES}"));
-    }
-    if !song.instruments[usize::from(REF_INSTRUMENT_SLOT)].is_empty() {
-        return Err(format!("instrument {REF_INSTRUMENT_SLOT:02X} is already used"));
     }
     let empty = usize::from(empty_id);
     if empty >= Song::N_CHAINS {
@@ -175,11 +176,25 @@ mod tests {
         assert!(plan_layout(&empty_song(), 0, EMPTY_ID).is_err());
     }
 
-    #[test]
-    fn used_reference_instrument_slot_is_rejected() {
+    fn song_with_used_reference_slot() -> Song {
         let mut song = empty_song();
         song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(blank_sampler(PATH).unwrap());
-        assert!(plan_layout(&song, SLICES, EMPTY_ID).is_err());
+        song
+    }
+
+    #[test]
+    fn used_reference_instrument_slot_is_not_free() {
+        assert!(!reference_slot_is_free(&song_with_used_reference_slot()));
+    }
+
+    #[test]
+    fn unused_reference_instrument_slot_is_free() {
+        assert!(reference_slot_is_free(&empty_song()));
+    }
+
+    #[test]
+    fn layout_planning_does_not_judge_the_reference_slot() {
+        assert!(plan_layout(&song_with_used_reference_slot(), SLICES, EMPTY_ID).is_ok());
     }
 
     #[test]

@@ -23,6 +23,9 @@ struct Args {
     /// Hex id of the empty chain and phrase (default FE)
     #[arg(long, value_parser = parse_hex_id)]
     empty_id: Option<u8>,
+    /// Replace instrument 7F if it is already used
+    #[arg(long)]
+    force: bool,
 }
 
 fn parse_hex_id(id: &str) -> Result<u8, ParseIntError> {
@@ -39,10 +42,11 @@ fn main() -> ExitCode {
         m8_dir: args.m8_dir,
         out: args.out,
         empty_id: args.empty_id.unwrap_or(DEFAULT_EMPTY_ID),
+        force: args.force,
     };
     match run(&request) {
-        Ok(warning) => {
-            warning.iter().for_each(|message| eprintln!("{message}"));
+        Ok(warnings) => {
+            warnings.iter().for_each(|message| eprintln!("{message}"));
             println!("wrote {}", out.display());
             ExitCode::SUCCESS
         }

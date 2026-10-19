@@ -1,6 +1,6 @@
 use m8_file_parser::{Instrument, SamplePlayMode, Sampler, Song, SongSteps};
 use ref_inserter::alloc::DEFAULT_START;
-use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT};
+use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
 use ref_inserter::{DEFAULT_EMPTY_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -78,10 +78,11 @@ fn request(workspace: &Workspace) -> Request {
         m8_dir: M8_DIR.to_string(),
         out: workspace.out.clone(),
         empty_id: EMPTY_ID,
+        force: false,
     }
 }
 
-fn run_in(workspace: &Workspace) -> Result<Option<String>, String> {
+fn run_in(workspace: &Workspace) -> Result<Vec<String>, String> {
     run(&request(workspace))
 }
 
@@ -235,17 +236,17 @@ fn shifted_start_id_produces_a_warning() {
     let mut writer = m8_file_parser::writer::Writer::new(std::fs::read(PROJECT_FIXTURE).unwrap());
     song.write(&mut writer).unwrap();
     let workspace = workspace_with(&writer.finish(), &wav_bytes(frames_for_slices(SLICES)));
-    let warning = run_in(&workspace).unwrap().unwrap();
-    assert!(warning.contains(&format!("{NEXT_BLOCK_START_ID:02X}")));
+    let warnings = run_in(&workspace).unwrap();
+    assert!(warnings[0].contains(&format!("{NEXT_BLOCK_START_ID:02X}")));
 }
 
 #[test]
 fn default_start_id_produces_no_warning() {
     let workspace = workspace(SLICES);
-    assert_eq!(run_in(&workspace).unwrap(), None);
+    assert!(run_in(&workspace).unwrap().is_empty());
 }
 
-fn run_with_reference_named(workspace: &Workspace, file_name: &str) -> Result<Option<String>, String> {
+fn run_with_reference_named(workspace: &Workspace, file_name: &str) -> Result<Vec<String>, String> {
     let renamed = workspace.wav.with_file_name(file_name);
     std::fs::rename(&workspace.wav, &renamed).unwrap();
     run(&Request { reference_wav: renamed, ..request(workspace) })
@@ -269,4 +270,42 @@ fn instrument_path_uses_the_slug() {
 fn reference_name_without_any_ascii_letters_or_digits_is_rejected() {
     let workspace = workspace(SLICES);
     assert!(run_with_reference_named(&workspace, "!!!.wav").is_err());
+}
+
+fn workspace_with_used_reference_slot() -> Workspace {
+    let project_bytes = std::fs::read(PROJECT_FIXTURE).unwrap();
+    let mut song = fixture_song();
+    let mut old_sampler = blank_sampler("/old.wav").unwrap();
+    old_sampler.name = "OLD".to_string();
+    song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(old_sampler);
+    let mut writer = m8_file_parser::writer::Writer::new(project_bytes);
+    song.write(&mut writer).unwrap();
+    workspace_with(&writer.finish(), &wav_bytes(frames_for_slices(SLICES)))
+}
+
+#[test]
+fn used_reference_slot_is_rejected_without_force() {
+    let workspace = workspace_with_used_reference_slot();
+    assert!(run_in(&workspace).is_err());
+}
+
+#[test]
+fn force_replaces_a_used_reference_slot() {
+    let workspace = workspace_with_used_reference_slot();
+    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert_eq!(reference_sampler(&workspace).name, "REFERENCE");
+}
+
+#[test]
+fn replacing_a_used_reference_slot_produces_a_warning() {
+    let workspace = workspace_with_used_reference_slot();
+    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("7F")));
+}
+
+#[test]
+fn force_on_a_free_reference_slot_produces_no_warning() {
+    let workspace = workspace(SLICES);
+    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert!(warnings.is_empty());
 }
