@@ -1,5 +1,8 @@
 mod common;
 
+use common::{
+    PROJECT_FIXTURE, SAMPLE_RATE, Workspace, fixture_song, request, slice_frames, workspace_with,
+};
 use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, Options, REF_INSTRUMENT_SLOT, blank_sampler};
@@ -8,12 +11,8 @@ use ref_inserter::{
     DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Report,
     Request, run, wav,
 };
-use std::path::{Path, PathBuf};
-use tempfile::TempDir;
+use std::path::Path;
 
-const PROJECT_FIXTURE: &str = "tests/fixtures/V6_6EMPTY.m8s";
-const SAMPLE_RATE: u32 = 100;
-const M8_DIR: &str = "/Samples/ref";
 const EMPTY_ID: u8 = DEFAULT_EMPTY_ID;
 const PHRASE_ID: u8 = DEFAULT_PHRASE_ID;
 const CUSTOM_PHRASE_ID: u8 = 0xEF;
@@ -21,42 +20,12 @@ const SECOND_SLICE: usize = 1;
 const SLICES: usize = 3;
 const DEFAULT_START_ID: u8 = DEFAULT_START as u8;
 
-struct Workspace {
-    _dir: TempDir,
-    project: PathBuf,
-    wav: PathBuf,
-    dest: PathBuf,
-    out: PathBuf,
-}
-
 fn wav_bytes(frames: u32) -> Vec<u8> {
     common::wav_bytes(SAMPLE_RATE, frames)
 }
 
-fn fixture_song() -> Song {
-    Song::read(&mut std::fs::read(PROJECT_FIXTURE).unwrap().as_slice()).unwrap()
-}
-
-fn slice_frames() -> u32 {
-    wav::slice_frames(SAMPLE_RATE, fixture_song().tempo)
-}
-
 fn frames_for_slices(slices: usize) -> u32 {
     slice_frames() * slices as u32 - slice_frames() / 2
-}
-
-fn workspace_with(project_bytes: &[u8], wav_contents: &[u8]) -> Workspace {
-    let dir = TempDir::new().unwrap();
-    let workspace = Workspace {
-        project: dir.path().join("project.m8s"),
-        wav: dir.path().join("reference.wav"),
-        dest: dir.path().join("samples"),
-        out: dir.path().join("out.m8s"),
-        _dir: dir,
-    };
-    std::fs::write(&workspace.project, project_bytes).unwrap();
-    std::fs::write(&workspace.wav, wav_contents).unwrap();
-    workspace
 }
 
 fn workspace(slices: usize) -> Workspace {
@@ -64,22 +33,6 @@ fn workspace(slices: usize) -> Workspace {
         &std::fs::read(PROJECT_FIXTURE).unwrap(),
         &wav_bytes(frames_for_slices(slices)),
     )
-}
-
-fn request(workspace: &Workspace) -> Request {
-    Request {
-        project: workspace.project.clone(),
-        reference_wav: workspace.wav.clone(),
-        dest_dir: workspace.dest.clone(),
-        m8_dir: M8_DIR.to_string(),
-        out: workspace.out.clone(),
-        empty_id: EMPTY_ID,
-        phrase_id: PHRASE_ID,
-        chain_phrases: DEFAULT_CHAIN_PHRASES,
-        force: false,
-        dry_run: false,
-        bpm: None,
-    }
 }
 
 fn run_in(workspace: &Workspace) -> Result<Vec<String>, String> {
