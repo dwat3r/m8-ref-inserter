@@ -39,6 +39,7 @@ pub struct Report {
     pub copied_wav: PathBuf,
     pub out: PathBuf,
     pub dry_run: bool,
+    pub reused_wav: bool,
 }
 
 impl Report {
@@ -59,11 +60,19 @@ impl Report {
                 "shared phrase {:02X}, instrument {REF_INSTRUMENT_SLOT:02X} plays {}",
                 self.phrase_id, self.sample_path
             ),
-            format!(
-                "{written} {} and {}",
-                self.out.display(),
-                self.copied_wav.display()
-            ),
+            if self.reused_wav {
+                format!(
+                    "{written} {}; {} already up to date",
+                    self.out.display(),
+                    self.copied_wav.display()
+                )
+            } else {
+                format!(
+                    "{written} {} and {}",
+                    self.out.display(),
+                    self.copied_wav.display()
+                )
+            },
         ]
     }
 }
@@ -157,7 +166,9 @@ pub fn run(request: &Request) -> Result<Report, String> {
         ));
     }
     let copied_wav = request.dest_dir.join(&file_name);
-    if !request.force {
+    let cued_wav = wav::with_cue_points(&reference, slice_frames, slices);
+    let reuses_wav = copied_wav.exists() && read_file(&copied_wav)? == cued_wav;
+    if !reuses_wav && !request.force {
         refuse_existing(&copied_wav)?;
     }
 
@@ -167,10 +178,9 @@ pub fn run(request: &Request) -> Result<Report, String> {
 
     if !request.dry_run {
         create_dir(&request.dest_dir)?;
-        write_file(
-            &copied_wav,
-            &wav::with_cue_points(&reference, slice_frames, slices),
-        )?;
+        if !reuses_wav {
+            write_file(&copied_wav, &cued_wav)?;
+        }
         write_file(&request.out, &writer.finish())?;
     }
 
@@ -207,6 +217,7 @@ pub fn run(request: &Request) -> Result<Report, String> {
         copied_wav,
         out: request.out.clone(),
         dry_run: request.dry_run,
+        reused_wav: reuses_wav,
     })
 }
 

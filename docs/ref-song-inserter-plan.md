@@ -41,7 +41,7 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - **Previous insertion** (`previous.rs`): instrument 7F is a Sampler (any name), and chains are recognized in two layouts. Shared phrase layout: one or more `[P, E, E, E]` groups (zero transpose on the E steps) followed by empty steps, with phrase P playing the reference, whatever `--chain-phrases` was. Old layout: chain c is `[c, E, E, E]` and phrase c plays the reference. Phrase "plays the reference" = row 0 has a note on instrument 7F and all other rows are empty.
 - **Clearing:** those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row. Then it inserts fresh, normally at C0 and the same rows.
 - **Stray phrase:** if phrase P holds exactly one non-empty step and it is a note on instrument 7F, it is cleared even if no chain owns it, with a warning.
-- **Also with `--force`:** replaces a used instrument 7F, overwrites an existing copied WAV and an existing `--out`.
+- **Also with `--force`:** replaces a used instrument 7F, overwrites a differing copied WAV and an existing `--out`.
 - **Warnings** (printed to stderr, tense-neutral so they read correctly in a dry run): replacing a previous insertion (with chain count), overwriting the stray phrase, replacing a foreign instrument 7F, overwriting an existing `--out`.
 
 ## File structure
@@ -65,7 +65,7 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 2. Read and parse the project, parse the WAV, compute slices.
 3. Detect a previous insertion; note whether instrument 7F is used; with `--force` clear the previous insertion and stray phrase.
 4. `plan_layout` (version, slice count, chain phrases, ids, silent E, free chain block, free phrase P, rows).
-5. Error if 7F is used without `--force`; build the slug and sample path (length check); refuse an existing copied WAV unless `--force`.
+5. Error if 7F is used without `--force`; build the slug and sample path (length check); an existing copied WAV that is byte-identical to the one that would be written is reused (nothing is written for it, the summary says "already up to date"); a differing one is refused unless `--force`.
 6. `apply` and serialize the song in memory.
 7. Only then (and only without `--dry-run`) create `--dest-dir`, write the WAV, write `--out`.
 8. Return a `Report`; `main` prints its warnings to stderr and its summary (slice and chain counts, chain ids, song rows, shared phrase, sample path, written or dry run) to stdout.

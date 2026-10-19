@@ -46,7 +46,7 @@ Copy the WAV and the new project to the M8's SD card.
 - Running it on its own output aborts. `--force` removes the previous insertion (found by its pattern: a sampler at 7F, whatever its name, and chains made of `[phrase, FE, FE, FE]` groups, whatever `--chain-phrases` was; the older one-phrase-per-chain layout is recognized too) and inserts again, overwriting the old copied WAV.
 - `--force` also overwrites the shared phrase (F0 by default) when it holds exactly one note on instrument 7F, and warns.
 - Anything else using the C0 chain ids or the phrase id aborts, even with `--force`.
-- Never overwrites an existing `--out` file or copied WAV without `--force`. The input project is never overwritten, even with `--force`.
+- Never overwrites an existing `--out` file, or a copied WAV that differs, without `--force`. An existing copied WAV that is byte-identical is reused, so several projects can share one reference WAV. The input project is never overwritten, even with `--force`.
 - The sample name is slugged to ASCII (`[A-Za-z0-9_-]`).
 
 ## Credits

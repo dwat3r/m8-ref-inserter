@@ -2,8 +2,8 @@ use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps,
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
 use ref_inserter::{
-    DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run,
-    wav,
+    DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Report,
+    Request, run, wav,
 };
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -722,4 +722,41 @@ fn summary_says_written_after_a_real_run() {
 fn summary_says_dry_run_when_nothing_is_written() {
     let workspace = workspace(SLICES);
     assert!(summary_of(&dry_run_request(&workspace)).contains("dry run"));
+}
+
+fn rerun_from_original(workspace: &Workspace) -> Result<Report, String> {
+    run(&Request {
+        out: workspace.out.with_file_name("again.m8s"),
+        ..request(workspace)
+    })
+}
+
+#[test]
+fn identical_existing_wav_is_reused_without_force() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    assert!(rerun_from_original(&workspace).is_ok());
+}
+
+#[test]
+fn reused_wav_is_reported_as_up_to_date() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let summary = rerun_from_original(&workspace)
+        .unwrap()
+        .summary()
+        .join("\n");
+    assert!(summary.contains("already up to date"));
+}
+
+#[test]
+fn dry_run_reuses_an_identical_wav_too() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let again = Request {
+        out: workspace.out.with_file_name("again.m8s"),
+        dry_run: true,
+        ..request(&workspace)
+    };
+    assert!(run(&again).is_ok());
 }
