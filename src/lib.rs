@@ -124,9 +124,12 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     });
     let instrument_warning = (replaces_instrument && previous.is_empty())
         .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
+    let stray_warning = previous.stray_phrase.filter(|_| request.force).map(|phrase| {
+        format!("warning: overwrote phrase {phrase:02X}, it held a single note on instrument {REF_INSTRUMENT_SLOT:02X}")
+    });
     let output_warning = overwrites_output
         .then(|| format!("warning: overwrote existing {}", request.out.display()));
-    Ok([previous_warning, instrument_warning, output_warning].into_iter().flatten().collect())
+    Ok([previous_warning, stray_warning, instrument_warning, output_warning].into_iter().flatten().collect())
 }
 
 #[cfg(test)]

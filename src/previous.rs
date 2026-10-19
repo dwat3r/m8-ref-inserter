@@ -1,5 +1,5 @@
 use crate::alloc::ID_LIMIT;
-use crate::insert::{Options, PHRASES_PER_SLICE, REF_INSTRUMENT_SLOT, REFERENCE_NAME};
+use crate::insert::{Options, PHRASES_PER_SLICE, REF_INSTRUMENT_SLOT};
 use m8_file_parser::{ChainStep, Instrument, Song, SongSteps};
 
 const EMPTY_CELL: u8 = 0xFF;
@@ -9,6 +9,7 @@ const TRACKS: usize = SongSteps::TRACK_COUNT;
 pub struct PreviousInsertion {
     pub chains: Vec<usize>,
     pub phrases: Vec<usize>,
+    pub stray_phrase: Option<usize>,
 }
 
 impl PreviousInsertion {
@@ -20,7 +21,7 @@ impl PreviousInsertion {
 fn reference_sampler_installed(song: &Song) -> bool {
     matches!(
         &song.instruments[usize::from(REF_INSTRUMENT_SLOT)],
-        Instrument::Sampler(sampler) if sampler.name == REFERENCE_NAME
+        Instrument::Sampler(_)
     )
 }
 
@@ -65,9 +66,17 @@ fn is_own_phrase_chain(song: &Song, id: usize, options: &Options) -> bool {
     chain_phrases_match(song, id, id as u8, options.empty) && phrase_plays_reference(song, id)
 }
 
-pub fn previous_insertion(song: &Song, options: &Options) -> PreviousInsertion {
+fn is_lone_reference_note(song: &Song, id: usize) -> bool {
+    let filled: Vec<_> = song.phrases[id].steps.iter().filter(|row| !row.is_empty()).collect();
+    matches!(
+        filled.as_slice(),
+        [only] if !only.note.is_empty() && only.instrument == REF_INSTRUMENT_SLOT
+    )
+}
+
+fn owned_by_reference(song: &Song, options: &Options) -> (Vec<usize>, Vec<usize>) {
     if !reference_sampler_installed(song) {
-        return PreviousInsertion { chains: Vec::new(), phrases: Vec::new() };
+        return (Vec::new(), Vec::new());
     }
     let shared: Vec<usize> = (0..ID_LIMIT)
         .filter(|&id| is_shared_phrase_chain(song, id, options))
@@ -78,15 +87,22 @@ pub fn previous_insertion(song: &Song, options: &Options) -> PreviousInsertion {
     let shared_phrase = (!shared.is_empty()).then_some(usize::from(options.phrase));
     let mut chains = [shared, own.clone()].concat();
     chains.sort_unstable();
-    PreviousInsertion {
-        chains,
-        phrases: shared_phrase.into_iter().chain(own).collect(),
-    }
+    (chains, shared_phrase.into_iter().chain(own).collect())
+}
+
+pub fn previous_insertion(song: &Song, options: &Options) -> PreviousInsertion {
+    let (chains, phrases) = owned_by_reference(song, options);
+    let phrase = usize::from(options.phrase);
+    let stray_phrase = (!phrases.contains(&phrase) && is_lone_reference_note(song, phrase)).then_some(phrase);
+    PreviousInsertion { chains, phrases, stray_phrase }
 }
 
 pub fn clear_previous(song: &mut Song, previous: &PreviousInsertion, empty_id: u8) {
     previous.chains.iter().for_each(|&id| song.chains[id].clear());
     previous.phrases.iter().for_each(|&id| song.phrases[id].clear());
+    if let Some(phrase) = previous.stray_phrase {
+        song.phrases[phrase].clear();
+    }
     let rows: Vec<usize> = (0..SongSteps::ROW_COUNT)
         .filter(|&row| previous.chains.contains(&usize::from(song.song.steps[row * TRACKS])))
         .collect();
@@ -124,6 +140,8 @@ mod tests {
     const TRACKS: usize = SongSteps::TRACK_COUNT;
     const SLOT: usize = 0x7F;
     const UNSET_VELOCITY: u8 = 0xFF;
+    const MANUAL_VELOCITY: u8 = 0x64;
+    const OTHER_INSTRUMENT: u8 = 0x01;
 
     fn fixture() -> Song {
         let bytes = std::fs::read("tests/fixtures/V6_6EMPTY.m8s").unwrap();
@@ -241,13 +259,76 @@ mod tests {
     }
 
     #[test]
-    fn sampler_not_named_reference_means_no_previous_insertion() {
+    fn sampler_with_another_name_is_still_a_previous_insertion() {
         let mut song = with_reference(fixture());
         let Instrument::Sampler(sampler) = &mut song.instruments[SLOT] else {
             panic!("slot 7F is not a sampler");
         };
-        sampler.name = format!("NOT {REFERENCE_NAME}");
+        sampler.name = String::new();
+        assert_eq!(previous_insertion(&song, &OPTIONS).chains, chain_ids(DEFAULT_START, SLICES));
+    }
+
+    #[test]
+    fn missing_sampler_means_no_previous_insertion() {
+        let mut song = with_reference(fixture());
+        song.instruments[SLOT] = Instrument::None;
         assert!(previous_insertion(&song, &OPTIONS).is_empty());
+    }
+
+    fn song_with_phrase_rows(rows: &[(usize, u8)]) -> Song {
+        let mut song = fixture();
+        rows.iter().for_each(|&(row, instrument)| {
+            song.phrases[usize::from(PHRASE_ID)].steps[row] = Step {
+                note: Note(0),
+                velocity: MANUAL_VELOCITY,
+                instrument,
+                ..Step::default()
+            };
+        });
+        song
+    }
+
+    #[test]
+    fn lone_note_on_instrument_7f_in_the_phrase_slot_is_a_stray_phrase() {
+        let song = song_with_phrase_rows(&[(0, SLOT as u8)]);
+        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, Some(usize::from(PHRASE_ID)));
+    }
+
+    #[test]
+    fn lone_note_on_a_later_row_is_still_a_stray_phrase() {
+        let song = song_with_phrase_rows(&[(3, SLOT as u8)]);
+        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, Some(usize::from(PHRASE_ID)));
+    }
+
+    #[test]
+    fn phrase_with_two_notes_is_not_a_stray_phrase() {
+        let song = song_with_phrase_rows(&[(0, SLOT as u8), (4, SLOT as u8)]);
+        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, None);
+    }
+
+    #[test]
+    fn lone_note_on_another_instrument_is_not_a_stray_phrase() {
+        let song = song_with_phrase_rows(&[(0, OTHER_INSTRUMENT)]);
+        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, None);
+    }
+
+    #[test]
+    fn empty_phrase_slot_is_not_a_stray_phrase() {
+        assert_eq!(previous_insertion(&fixture(), &OPTIONS).stray_phrase, None);
+    }
+
+    #[test]
+    fn phrase_owned_by_a_detected_insertion_is_not_a_stray_phrase() {
+        let found = previous_insertion(&with_reference(fixture()), &OPTIONS);
+        assert_eq!(found.stray_phrase, None);
+    }
+
+    #[test]
+    fn clearing_empties_a_stray_phrase() {
+        let mut song = song_with_phrase_rows(&[(0, SLOT as u8)]);
+        let previous = previous_insertion(&song, &OPTIONS);
+        clear_previous(&mut song, &previous, EMPTY_ID);
+        assert!(song.phrases[usize::from(PHRASE_ID)].is_empty());
     }
 
     #[test]

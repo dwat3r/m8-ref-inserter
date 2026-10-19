@@ -1,4 +1,4 @@
-use m8_file_parser::{Instrument, SamplePlayMode, Sampler, Song, SongSteps};
+use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
 use ref_inserter::{DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
@@ -280,6 +280,58 @@ fn sample_path_one_over_maximum_length_is_rejected() {
 fn non_wav_reference_is_rejected() {
     let workspace = workspace_with(&std::fs::read(PROJECT_FIXTURE).unwrap(), b"ID3 not a wav");
     assert!(run_in(&workspace).is_err());
+}
+
+fn workspace_with_unfinished_manual_attempt() -> Workspace {
+    let mut song = fixture_song();
+    let mut manual_sampler = blank_sampler("/Samples/Reference/manual.wav").unwrap();
+    manual_sampler.name = String::new();
+    song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(manual_sampler);
+    let lone_note = |note: u8| Step {
+        note: Note(note),
+        velocity: 0x64,
+        instrument: REF_INSTRUMENT_SLOT,
+        ..Step::default()
+    };
+    (0..2usize).for_each(|slice| {
+        let id = usize::from(DEFAULT_START_ID) + slice;
+        song.phrases[id].steps[0] = lone_note(slice as u8);
+        [id as u8, EMPTY_ID, EMPTY_ID, EMPTY_ID]
+            .iter()
+            .zip(song.chains[id].steps.iter_mut())
+            .for_each(|(&phrase, step)| step.phrase = phrase);
+        song.song.steps[slice * SongSteps::TRACK_COUNT] = id as u8;
+    });
+    song.phrases[usize::from(PHRASE_ID)].steps[0] = lone_note(0);
+    workspace_with(&serialized(&song), &wav_bytes(frames_for_slices(SLICES)))
+}
+
+#[test]
+fn unfinished_manual_attempt_is_rejected_without_force() {
+    assert!(run_in(&workspace_with_unfinished_manual_attempt()).is_err());
+}
+
+#[test]
+fn force_replaces_an_unfinished_manual_attempt() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID)].steps[0];
+    assert_eq!(step.phrase, PHRASE_ID);
+}
+
+#[test]
+fn force_resets_the_manual_phrase_to_the_reference_note() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let velocity = read_out(&workspace).phrases[usize::from(PHRASE_ID)].steps[0].velocity;
+    assert_eq!(velocity, 0xFF);
+}
+
+#[test]
+fn overwriting_the_manual_phrase_produces_a_warning() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("F0")));
 }
 
 fn workspace_with_foreign_default_block() -> Workspace {
