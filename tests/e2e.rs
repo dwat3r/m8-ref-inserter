@@ -86,11 +86,12 @@ fn request(workspace: &Workspace) -> Request {
         phrase_id: PHRASE_ID,
         chain_phrases: DEFAULT_CHAIN_PHRASES,
         force: false,
+        dry_run: false,
     }
 }
 
 fn run_in(workspace: &Workspace) -> Result<Vec<String>, String> {
-    run(&request(workspace))
+    run(&request(workspace)).map(|report| report.warnings)
 }
 
 fn m8_dir_for_path_len(path_len: usize) -> String {
@@ -126,6 +127,7 @@ fn second_run(workspace: &Workspace, force: bool) -> Result<Vec<String>, String>
         force,
         ..request(workspace)
     })
+    .map(|report| report.warnings)
 }
 
 #[test]
@@ -241,8 +243,13 @@ fn overwriting_an_existing_output_produces_a_warning() {
         force: true,
         ..request(&workspace)
     })
-    .unwrap();
-    assert!(warnings.iter().any(|warning| warning.contains("overwrote")));
+    .unwrap()
+    .warnings;
+    assert!(
+        warnings
+            .iter()
+            .any(|warning| warning.contains("overwriting"))
+    );
 }
 
 #[test]
@@ -383,7 +390,8 @@ fn overwriting_the_manual_phrase_produces_a_warning() {
         force: true,
         ..request(&workspace)
     })
-    .unwrap();
+    .unwrap()
+    .warnings;
     assert!(warnings.iter().any(|warning| warning.contains("F0")));
 }
 
@@ -466,6 +474,7 @@ fn run_with_reference_named(workspace: &Workspace, file_name: &str) -> Result<Ve
         reference_wav: renamed,
         ..request(workspace)
     })
+    .map(|report| report.warnings)
 }
 
 #[test]
@@ -523,7 +532,8 @@ fn replacing_a_used_reference_slot_produces_a_warning() {
         force: true,
         ..request(&workspace)
     })
-    .unwrap();
+    .unwrap()
+    .warnings;
     assert!(warnings.iter().any(|warning| warning.contains("7F")));
 }
 
@@ -534,7 +544,8 @@ fn force_on_a_free_reference_slot_produces_no_warning() {
         force: true,
         ..request(&workspace)
     })
-    .unwrap();
+    .unwrap()
+    .warnings;
     assert!(warnings.is_empty());
 }
 
@@ -625,4 +636,90 @@ fn chain_phrase_count_that_is_not_a_multiple_of_four_is_rejected() {
         })
         .is_err()
     );
+}
+
+fn dry_run_request(workspace: &Workspace) -> Request {
+    Request {
+        dry_run: true,
+        ..request(workspace)
+    }
+}
+
+#[test]
+fn dry_run_writes_no_files() {
+    let workspace = workspace(SLICES);
+    run(&dry_run_request(&workspace)).unwrap();
+    assert!(!workspace.out.exists() && !workspace.dest.exists());
+}
+
+#[test]
+fn dry_run_rejects_what_a_real_run_would_reject() {
+    let workspace = workspace(MAX_SLICES + 1);
+    assert!(run(&dry_run_request(&workspace)).is_err());
+}
+
+#[test]
+fn dry_run_refuses_an_existing_output_like_a_real_run() {
+    let workspace = workspace(SLICES);
+    std::fs::write(&workspace.out, b"keep me").unwrap();
+    assert!(run(&dry_run_request(&workspace)).is_err());
+}
+
+#[test]
+fn dry_run_reports_the_same_warnings_as_a_real_run() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    let request = Request {
+        force: true,
+        dry_run: true,
+        ..request(&workspace)
+    };
+    let warnings = run(&request).unwrap().warnings;
+    assert!(warnings.iter().any(|warning| warning.contains("F0")));
+}
+
+#[test]
+fn dry_run_with_force_leaves_the_output_file_absent() {
+    let workspace = workspace_with_unfinished_manual_attempt();
+    run(&Request {
+        force: true,
+        dry_run: true,
+        ..request(&workspace)
+    })
+    .unwrap();
+    assert!(!workspace.out.exists());
+}
+
+fn summary_of(request: &Request) -> String {
+    run(request).unwrap().summary().join("\n")
+}
+
+#[test]
+fn summary_names_slices_and_chain_ids() {
+    let workspace = workspace(SLICES);
+    assert!(summary_of(&request(&workspace)).contains("3 slices in 3 chains (C0 to C2)"));
+}
+
+#[test]
+fn summary_names_the_song_rows() {
+    let workspace = workspace(SLICES);
+    assert!(summary_of(&request(&workspace)).contains("song rows 00 to 02"));
+}
+
+#[test]
+fn summary_names_the_shared_phrase_and_sample_path() {
+    let workspace = workspace(SLICES);
+    let summary = summary_of(&request(&workspace));
+    assert!(summary.contains("phrase F0") && summary.contains("/Samples/ref/reference.wav"));
+}
+
+#[test]
+fn summary_says_written_after_a_real_run() {
+    let workspace = workspace(SLICES);
+    assert!(summary_of(&request(&workspace)).contains("wrote"));
+}
+
+#[test]
+fn summary_says_dry_run_when_nothing_is_written() {
+    let workspace = workspace(SLICES);
+    assert!(summary_of(&dry_run_request(&workspace)).contains("dry run"));
 }

@@ -24,6 +24,48 @@ pub struct Request {
     pub phrase_id: u8,
     pub chain_phrases: usize,
     pub force: bool,
+    pub dry_run: bool,
+}
+
+#[derive(Debug)]
+pub struct Report {
+    pub warnings: Vec<String>,
+    pub slices: usize,
+    pub chains: usize,
+    pub first_chain: usize,
+    pub first_row: usize,
+    pub phrase_id: u8,
+    pub sample_path: String,
+    pub copied_wav: PathBuf,
+    pub out: PathBuf,
+    pub dry_run: bool,
+}
+
+impl Report {
+    pub fn summary(&self) -> Vec<String> {
+        let last_chain = self.first_chain + self.chains - 1;
+        let last_row = self.first_row + self.chains - 1;
+        let written = if self.dry_run {
+            "dry run: would write"
+        } else {
+            "wrote"
+        };
+        vec![
+            format!(
+                "{} slices in {} chains ({:02X} to {:02X}) on track 1, song rows {:02X} to {:02X}",
+                self.slices, self.chains, self.first_chain, last_chain, self.first_row, last_row
+            ),
+            format!(
+                "shared phrase {:02X}, instrument {REF_INSTRUMENT_SLOT:02X} plays {}",
+                self.phrase_id, self.sample_path
+            ),
+            format!(
+                "{written} {} and {}",
+                self.out.display(),
+                self.copied_wav.display()
+            ),
+        ]
+    }
 }
 
 fn read_file(path: &Path) -> Result<Vec<u8>, String> {
@@ -61,7 +103,7 @@ fn refuse_existing(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn run(request: &Request) -> Result<Vec<String>, String> {
+pub fn run(request: &Request) -> Result<Report, String> {
     if is_same_file(&request.project, &request.out) {
         return Err(format!(
             "{} is the input project, refusing to overwrite it",
@@ -123,27 +165,29 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     let mut writer = Writer::new(project_bytes);
     song.write(&mut writer)?;
 
-    create_dir(&request.dest_dir)?;
-    write_file(
-        &copied_wav,
-        &wav::with_cue_points(&reference, slice_frames, slices),
-    )?;
-    write_file(&request.out, &writer.finish())?;
+    if !request.dry_run {
+        create_dir(&request.dest_dir)?;
+        write_file(
+            &copied_wav,
+            &wav::with_cue_points(&reference, slice_frames, slices),
+        )?;
+        write_file(&request.out, &writer.finish())?;
+    }
 
     let previous_warning = (!previous.is_empty()).then(|| {
         format!(
-            "warning: replaced a previous reference insertion ({} chains)",
+            "warning: replacing a previous reference insertion ({} chains)",
             previous.chains.len()
         )
     });
     let instrument_warning = (replaces_instrument && previous.is_empty())
-        .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
+        .then(|| format!("warning: replacing existing instrument {REF_INSTRUMENT_SLOT:02X}"));
     let stray_warning = previous.stray_phrase.filter(|_| request.force).map(|phrase| {
-        format!("warning: overwrote phrase {phrase:02X}, it held a single note on instrument {REF_INSTRUMENT_SLOT:02X}")
+        format!("warning: overwriting phrase {phrase:02X}, it holds a single note on instrument {REF_INSTRUMENT_SLOT:02X}")
     });
-    let output_warning =
-        overwrites_output.then(|| format!("warning: overwrote existing {}", request.out.display()));
-    Ok([
+    let output_warning = overwrites_output
+        .then(|| format!("warning: overwriting existing {}", request.out.display()));
+    let warnings = [
         previous_warning,
         stray_warning,
         instrument_warning,
@@ -151,7 +195,19 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     ]
     .into_iter()
     .flatten()
-    .collect())
+    .collect();
+    Ok(Report {
+        warnings,
+        slices,
+        chains: layout.chains(),
+        first_chain: layout.start_id,
+        first_row: layout.start_row,
+        phrase_id: options.phrase,
+        sample_path,
+        copied_wav,
+        out: request.out.clone(),
+        dry_run: request.dry_run,
+    })
 }
 
 #[cfg(test)]

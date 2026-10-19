@@ -18,7 +18,7 @@ Status: built, tested (157 tests), pushed to https://github.com/dwat3r/m8-ref-in
 ```
 ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it> --out <new.m8s>
              [--empty-id <hex, default FE>] [--phrase-id <hex, default F0>]
-             [--chain-phrases <4|8|12|16, default 4>] [--force]
+             [--chain-phrases <4|8|12|16, default 4>] [--force] [--dry-run]
 ```
 
 ## Behavior
@@ -42,12 +42,12 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - **Clearing:** those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row. Then it inserts fresh, normally at C0 and the same rows.
 - **Stray phrase:** if phrase P holds exactly one non-empty step and it is a note on instrument 7F, it is cleared even if no chain owns it, with a warning.
 - **Also with `--force`:** replaces a used instrument 7F, overwrites an existing copied WAV and an existing `--out`.
-- **Warnings** (printed to stderr): previous insertion replaced (with chain count), stray phrase overwritten, foreign instrument 7F replaced, existing `--out` overwritten.
+- **Warnings** (printed to stderr, tense-neutral so they read correctly in a dry run): replacing a previous insertion (with chain count), overwriting the stray phrase, replacing a foreign instrument 7F, overwriting an existing `--out`.
 
 ## File structure
 
 - `src/main.rs`: clap args, builds a `Request`, prints warnings and errors. No logic.
-- `src/lib.rs`: `Request`, `run`, constants `DEFAULT_EMPTY_ID`, `DEFAULT_PHRASE_ID`, `DEFAULT_CHAIN_PHRASES`, `MAX_SAMPLE_PATH_LEN`, file helpers, `slug`.
+- `src/lib.rs`: `Request`, `Report` (warnings plus summary data, `summary()` lines), `run`, constants `DEFAULT_EMPTY_ID`, `DEFAULT_PHRASE_ID`, `DEFAULT_CHAIN_PHRASES`, `MAX_SAMPLE_PATH_LEN`, file helpers, `slug`.
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
 - `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free` (chain ids only), constants `ID_LIMIT`, `DEFAULT_START`, `ALIGN`, `ROW_GAP`.
 - `src/insert.rs`: `Options { empty, phrase, chain_phrases }`, `Layout`, `blank_sampler`, `reference_slot_is_free`, `plan_layout`, `apply`, `REF_INSTRUMENT_SLOT`, `REFERENCE_NAME`, `MAX_SLICES`, `PHRASES_PER_SLICE`.
@@ -67,7 +67,12 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 4. `plan_layout` (version, slice count, chain phrases, ids, silent E, free chain block, free phrase P, rows).
 5. Error if 7F is used without `--force`; build the slug and sample path (length check); refuse an existing copied WAV unless `--force`.
 6. `apply` and serialize the song in memory.
-7. Only then create `--dest-dir`, write the WAV, write `--out`.
+7. Only then (and only without `--dry-run`) create `--dest-dir`, write the WAV, write `--out`.
+8. Return a `Report`; `main` prints its warnings to stderr and its summary (slice and chain counts, chain ids, song rows, shared phrase, sample path, written or dry run) to stdout.
+
+## `--dry-run`
+
+Runs every check and the full in-memory build, including all refusals (existing files, too many slices, foreign content) and all warnings, then writes nothing and prints `dry run: would write ...`.
 
 ## Tests
 

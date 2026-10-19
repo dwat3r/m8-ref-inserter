@@ -35,6 +35,9 @@ struct Args {
     /// Replace a previous insertion, a used instrument 7F, and existing output files
     #[arg(long)]
     force: bool,
+    /// Validate and print what would change, without writing any file
+    #[arg(long)]
+    dry_run: bool,
 }
 
 fn parse_hex_id(id: &str) -> Result<u8, ParseIntError> {
@@ -43,7 +46,6 @@ fn parse_hex_id(id: &str) -> Result<u8, ParseIntError> {
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    let out = args.out.clone();
     let request = Request {
         project: args.project,
         reference_wav: args.reference_wav,
@@ -54,11 +56,15 @@ fn main() -> ExitCode {
         phrase_id: args.phrase_id.unwrap_or(DEFAULT_PHRASE_ID),
         chain_phrases: args.chain_phrases.unwrap_or(DEFAULT_CHAIN_PHRASES),
         force: args.force,
+        dry_run: args.dry_run,
     };
     match run(&request) {
-        Ok(warnings) => {
-            warnings.iter().for_each(|message| eprintln!("{message}"));
-            println!("wrote {}", out.display());
+        Ok(report) => {
+            report
+                .warnings
+                .iter()
+                .for_each(|message| eprintln!("{message}"));
+            report.summary().iter().for_each(|line| println!("{line}"));
             ExitCode::SUCCESS
         }
         Err(message) => {
