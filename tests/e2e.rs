@@ -1,7 +1,7 @@
 use m8_file_parser::{Instrument, SamplePlayMode, Sampler, Song, SongSteps};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
-use ref_inserter::{DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
+use ref_inserter::{DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -81,6 +81,7 @@ fn request(workspace: &Workspace) -> Request {
         out: workspace.out.clone(),
         empty_id: EMPTY_ID,
         phrase_id: PHRASE_ID,
+        chain_phrases: DEFAULT_CHAIN_PHRASES,
         force: false,
     }
 }
@@ -426,4 +427,40 @@ fn used_phrase_id_is_rejected() {
     song.phrases[usize::from(PHRASE_ID)].steps[0].instrument = 1;
     let workspace = workspace_with(&serialized(&song), &wav_bytes(frames_for_slices(SLICES)));
     assert!(run_in(&workspace).is_err());
+}
+
+const PACKED_PHRASES: usize = 8;
+const PACKED_SLICES: usize = 5;
+const PACKED_CHAINS: usize = 3;
+
+fn track_one_cells(song: &Song, rows: usize) -> Vec<u8> {
+    (0..rows)
+        .map(|row| song.song.steps[row * SongSteps::TRACK_COUNT])
+        .collect()
+}
+
+#[test]
+fn packed_run_writes_one_song_row_per_chain() {
+    let workspace = workspace(PACKED_SLICES);
+    run(&Request { chain_phrases: PACKED_PHRASES, ..request(&workspace) }).unwrap();
+    let cells = track_one_cells(&read_out(&workspace), PACKED_CHAINS + 1);
+    assert_eq!(
+        cells,
+        [DEFAULT_START_ID, DEFAULT_START_ID + 1, DEFAULT_START_ID + 2, 0xFF]
+    );
+}
+
+#[test]
+fn rerun_with_force_replaces_a_packed_insertion_with_a_different_packing() {
+    let workspace = workspace(PACKED_SLICES);
+    run(&Request { chain_phrases: PACKED_PHRASES, ..request(&workspace) }).unwrap();
+    second_run(&workspace, true).unwrap();
+    let song = read_song(&workspace.out.with_file_name("second.m8s"));
+    assert_eq!(track_one_cells(&song, PACKED_SLICES)[PACKED_SLICES - 1], DEFAULT_START_ID + 4);
+}
+
+#[test]
+fn chain_phrase_count_that_is_not_a_multiple_of_four_is_rejected() {
+    let workspace = workspace(SLICES);
+    assert!(run(&Request { chain_phrases: 6, ..request(&workspace) }).is_err());
 }

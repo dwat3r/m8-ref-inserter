@@ -3,7 +3,7 @@ pub mod insert;
 pub mod previous;
 pub mod wav;
 
-use insert::{REF_INSTRUMENT_SLOT, SpecialIds, apply, plan_layout, reference_slot_is_free};
+use insert::{Options, REF_INSTRUMENT_SLOT, apply, plan_layout, reference_slot_is_free};
 use m8_file_parser::Song;
 use m8_file_parser::writer::Writer;
 use previous::{clear_previous, previous_insertion};
@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 pub const MAX_SAMPLE_PATH_LEN: usize = 127;
 pub const DEFAULT_EMPTY_ID: u8 = 0xFE;
 pub const DEFAULT_PHRASE_ID: u8 = 0xF0;
+pub const DEFAULT_CHAIN_PHRASES: usize = 4;
 
 pub struct Request {
     pub project: PathBuf,
@@ -21,6 +22,7 @@ pub struct Request {
     pub out: PathBuf,
     pub empty_id: u8,
     pub phrase_id: u8,
+    pub chain_phrases: usize,
     pub force: bool,
 }
 
@@ -70,13 +72,17 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     let reference = wav::parse(&read_file(&request.reference_wav)?)?;
     let slice_frames = wav::slice_frames(reference.sample_rate, song.tempo);
     let slices = wav::slice_count(&reference, slice_frames);
-    let ids = SpecialIds { empty: request.empty_id, phrase: request.phrase_id };
-    let previous = previous_insertion(&song, &ids);
+    let options = Options {
+        empty: request.empty_id,
+        phrase: request.phrase_id,
+        chain_phrases: request.chain_phrases,
+    };
+    let previous = previous_insertion(&song, &options);
     let replaces_instrument = !reference_slot_is_free(&song);
     if request.force {
-        clear_previous(&mut song, &previous, ids.empty);
+        clear_previous(&mut song, &previous, options.empty);
     }
-    let layout = plan_layout(&song, slices, &ids)?;
+    let layout = plan_layout(&song, slices, &options)?;
     if replaces_instrument && !request.force {
         return Err(format!(
             "instrument {REF_INSTRUMENT_SLOT:02X} is already used, pass --force to replace it"

@@ -10,12 +10,14 @@ pub const MAX_SLICES: usize = 128;
 const UNSET_VELOCITY: u8 = 0xFF;
 const EMPTY_PHRASE_CELL: u8 = 0xFF;
 const FIRST_SLICE_NOTE: u8 = 0;
-const CHAIN_PHRASES: usize = 4;
+pub const PHRASES_PER_SLICE: usize = 4;
+const MAX_CHAIN_PHRASES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpecialIds {
+pub struct Options {
     pub empty: u8,
     pub phrase: u8,
+    pub chain_phrases: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -23,7 +25,17 @@ pub struct Layout {
     pub start_id: usize,
     pub start_row: usize,
     pub slices: usize,
-    pub ids: SpecialIds,
+    pub options: Options,
+}
+
+impl Layout {
+    fn slices_per_chain(&self) -> usize {
+        self.options.chain_phrases / PHRASES_PER_SLICE
+    }
+
+    pub fn chains(&self) -> usize {
+        self.slices.div_ceil(self.slices_per_chain())
+    }
 }
 
 pub fn blank_sampler(sample_path: &str) -> Result<Sampler, String> {
@@ -52,7 +64,7 @@ pub fn reference_slot_is_free(song: &Song) -> bool {
     song.instruments[usize::from(REF_INSTRUMENT_SLOT)].is_empty()
 }
 
-pub fn plan_layout(song: &Song, slices: usize, ids: &SpecialIds) -> Result<Layout, String> {
+pub fn plan_layout(song: &Song, slices: usize, options: &Options) -> Result<Layout, String> {
     let Version { major, minor, .. } = song.version;
     if (major, minor) != SUPPORTED_FIRMWARE {
         return Err(format!("only FW 6.6 projects are supported, found {major}.{minor}"));
@@ -60,66 +72,74 @@ pub fn plan_layout(song: &Song, slices: usize, ids: &SpecialIds) -> Result<Layou
     if !(1..=MAX_SLICES).contains(&slices) {
         return Err(format!("reference needs {slices} slices, supported range is 1 to {MAX_SLICES}"));
     }
-    let empty = usize::from(ids.empty);
+    let chain_phrases = options.chain_phrases;
+    if chain_phrases == 0 || chain_phrases > MAX_CHAIN_PHRASES || chain_phrases % PHRASES_PER_SLICE != 0 {
+        return Err(format!("chain phrases must be 4, 8, 12 or 16, got {chain_phrases}"));
+    }
+    let chains = slices.div_ceil(chain_phrases / PHRASES_PER_SLICE);
+    let empty = usize::from(options.empty);
     if empty >= Song::N_CHAINS {
-        return Err(format!("empty id {:02X} is out of range", ids.empty));
+        return Err(format!("empty id {:02X} is out of range", options.empty));
     }
-    if usize::from(ids.phrase) >= Song::N_PHRASES {
-        return Err(format!("phrase id {:02X} is out of range", ids.phrase));
+    if usize::from(options.phrase) >= Song::N_PHRASES {
+        return Err(format!("phrase id {:02X} is out of range", options.phrase));
     }
-    if ids.phrase == ids.empty {
-        return Err(format!("phrase id {:02X} must differ from the empty id", ids.phrase));
+    if options.phrase == options.empty {
+        return Err(format!("phrase id {:02X} must differ from the empty id", options.phrase));
     }
-    if !is_silent_chain(&song.chains[empty], ids.empty) || !song.phrases[empty].is_empty() {
+    if !is_silent_chain(&song.chains[empty], options.empty) || !song.phrases[empty].is_empty() {
         return Err(format!(
             "chain {:02X} is not silent or phrase {:02X} is not empty",
-            ids.empty, ids.empty
+            options.empty, options.empty
         ));
     }
     let used = used_ids(song);
-    let start_id = block_start(slices);
-    if !block_is_free(start_id, slices, &used) {
+    let start_id = block_start(chains);
+    if !block_is_free(start_id, chains, &used) {
         return Err(format!(
             "chain ids {start_id:02X} to {:02X} are already used, the reference may already be inserted, pass --force to replace a previous insertion",
-            start_id + slices - 1
+            start_id + chains - 1
         ));
     }
-    if used.phrases[usize::from(ids.phrase)] {
+    if used.phrases[usize::from(options.phrase)] {
         return Err(format!(
             "phrase {:02X} is already used, the reference may already be inserted, pass --force to replace a previous insertion",
-            ids.phrase
+            options.phrase
         ));
     }
-    if (start_id..start_id + slices).contains(&empty) {
-        return Err(format!("empty id {:02X} lies inside the reference chain block", ids.empty));
+    if (start_id..start_id + chains).contains(&empty) {
+        return Err(format!("empty id {:02X} lies inside the reference chain block", options.empty));
     }
     let start_row = last_used_row(&song.song).map_or(0, |row| row + 1 + ROW_GAP);
-    if start_row + slices > SongSteps::ROW_COUNT {
-        return Err(format!("song view has no room for {slices} rows from row {start_row}"));
+    if start_row + chains > SongSteps::ROW_COUNT {
+        return Err(format!("song view has no room for {chains} rows from row {start_row}"));
     }
-    Ok(Layout { start_id, start_row, slices, ids: *ids })
+    Ok(Layout { start_id, start_row, slices, options: *options })
 }
 
 pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), String> {
     song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(blank_sampler(sample_path)?);
-    song.phrases[usize::from(layout.ids.phrase)].steps[0] = Step {
+    song.phrases[usize::from(layout.options.phrase)].steps[0] = Step {
         note: Note(FIRST_SLICE_NOTE),
         velocity: UNSET_VELOCITY,
         instrument: REF_INSTRUMENT_SLOT,
         ..Step::default()
     };
+    let slices_per_chain = layout.slices_per_chain();
     (0..layout.slices).for_each(|slice| {
-        let id = layout.start_id + slice;
-        let steps = &mut song.chains[id].steps;
-        steps[0].phrase = layout.ids.phrase;
-        steps[0].transpose = slice as u8;
-        steps[1..CHAIN_PHRASES]
+        let steps = &mut song.chains[layout.start_id + slice / slices_per_chain].steps;
+        let first = (slice % slices_per_chain) * PHRASES_PER_SLICE;
+        steps[first].phrase = layout.options.phrase;
+        steps[first].transpose = slice as u8;
+        steps[first + 1..first + PHRASES_PER_SLICE]
             .iter_mut()
-            .for_each(|step| step.phrase = layout.ids.empty);
-        song.song.steps[(layout.start_row + slice) * SongSteps::TRACK_COUNT] = id as u8;
+            .for_each(|step| step.phrase = layout.options.empty);
+    });
+    (0..layout.chains()).for_each(|chain| {
+        song.song.steps[(layout.start_row + chain) * SongSteps::TRACK_COUNT] = (layout.start_id + chain) as u8;
     });
     (1..SongSteps::TRACK_COUNT).for_each(|track| {
-        song.song.steps[layout.start_row * SongSteps::TRACK_COUNT + track] = layout.ids.empty;
+        song.song.steps[layout.start_row * SongSteps::TRACK_COUNT + track] = layout.options.empty;
     });
     Ok(())
 }
@@ -127,14 +147,14 @@ pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DEFAULT_PHRASE_ID;
-    use crate::alloc::ALIGN;
+    use crate::alloc::{ALIGN, last_used_row};
+    use crate::{DEFAULT_CHAIN_PHRASES, DEFAULT_PHRASE_ID};
     use m8_file_parser::SamplePlayMode;
 
     const PATH: &str = "/Samples/ref/song.wav";
     const EMPTY_ID: u8 = 0xFE;
     const PHRASE_ID: u8 = DEFAULT_PHRASE_ID;
-    const IDS: SpecialIds = SpecialIds { empty: EMPTY_ID, phrase: PHRASE_ID };
+    const OPTIONS: Options = Options { empty: EMPTY_ID, phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
     const SLICES: usize = 3;
     const DEFAULT_START_ID: usize = 0xC0;
     const EMPTY_CELL: u8 = 0xFF;
@@ -163,7 +183,7 @@ mod tests {
     }
 
     fn plan(song: &Song, slices: usize) -> Result<Layout, String> {
-        plan_layout(song, slices, &IDS)
+        plan_layout(song, slices, &OPTIONS)
     }
 
     fn applied_song() -> Song {
@@ -237,7 +257,7 @@ mod tests {
         let layout = plan(&empty_song(), SLICES).unwrap();
         assert_eq!(
             layout,
-            Layout { start_id: DEFAULT_START_ID, start_row: 0, slices: SLICES, ids: IDS }
+            Layout { start_id: DEFAULT_START_ID, start_row: 0, slices: SLICES, options: OPTIONS }
         );
     }
 
@@ -266,13 +286,13 @@ mod tests {
 
     #[test]
     fn phrase_id_equal_to_empty_id_is_rejected() {
-        let ids = SpecialIds { empty: EMPTY_ID, phrase: EMPTY_ID };
+        let ids = Options { empty: EMPTY_ID, phrase: EMPTY_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
     #[test]
     fn phrase_id_outside_phrase_range_is_rejected() {
-        let ids = SpecialIds { empty: EMPTY_ID, phrase: EMPTY_CELL };
+        let ids = Options { empty: EMPTY_ID, phrase: EMPTY_CELL, chain_phrases: DEFAULT_CHAIN_PHRASES };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
@@ -338,13 +358,13 @@ mod tests {
 
     #[test]
     fn empty_id_inside_the_block_is_rejected() {
-        let ids = SpecialIds { empty: id(1), phrase: PHRASE_ID };
+        let ids = Options { empty: id(1), phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
     #[test]
     fn empty_id_outside_chain_range_is_rejected() {
-        let ids = SpecialIds { empty: EMPTY_CELL, phrase: PHRASE_ID };
+        let ids = Options { empty: EMPTY_CELL, phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
@@ -444,6 +464,107 @@ mod tests {
             panic!("slot 7F is not a sampler");
         };
         assert_eq!(sampler.sample_path, PATH);
+    }
+
+    const PACKED_PHRASES: usize = 8;
+    const PACKED_SLICES: usize = 5;
+    const PACKED_OPTIONS: Options = Options {
+        empty: EMPTY_ID,
+        phrase: PHRASE_ID,
+        chain_phrases: PACKED_PHRASES,
+    };
+    const FULLY_PACKED_PHRASES: usize = 16;
+    const SLICE_PHRASES: usize = 4;
+
+    fn packed_song() -> Song {
+        let mut song = empty_song();
+        let layout = plan_layout(&song, PACKED_SLICES, &PACKED_OPTIONS).unwrap();
+        apply(&mut song, &layout, PATH).unwrap();
+        song
+    }
+
+    fn with_chain_phrases(chain_phrases: usize) -> Options {
+        Options { chain_phrases, ..OPTIONS }
+    }
+
+    #[test]
+    fn chain_phrase_counts_that_are_multiples_of_four_up_to_sixteen_are_accepted() {
+        let all_accepted = [4, 8, 12, 16]
+            .into_iter()
+            .all(|count| plan_layout(&empty_song(), SLICES, &with_chain_phrases(count)).is_ok());
+        assert!(all_accepted);
+    }
+
+    #[test]
+    fn chain_phrase_count_that_is_not_a_multiple_of_four_is_rejected() {
+        assert!(plan_layout(&empty_song(), SLICES, &with_chain_phrases(6)).is_err());
+    }
+
+    #[test]
+    fn chain_phrase_count_above_sixteen_is_rejected() {
+        assert!(plan_layout(&empty_song(), SLICES, &with_chain_phrases(20)).is_err());
+    }
+
+    #[test]
+    fn zero_chain_phrases_are_rejected() {
+        assert!(plan_layout(&empty_song(), SLICES, &with_chain_phrases(0)).is_err());
+    }
+
+    #[test]
+    fn packed_layout_uses_one_song_row_per_chain() {
+        let song = packed_song();
+        let cells: Vec<u8> = (0..3).map(|row| song_cell(&song, row, 0)).collect();
+        assert_eq!(cells, [id(0), id(1), id(2)]);
+    }
+
+    #[test]
+    fn packed_layout_ends_the_song_rows_after_the_last_chain() {
+        assert_eq!(last_used_row(&packed_song().song), Some(2));
+    }
+
+    #[test]
+    fn packed_chain_holds_slice_groups_back_to_back() {
+        let song = packed_song();
+        let phrases: Vec<u8> = song.chains[DEFAULT_START_ID].steps[..PACKED_PHRASES]
+            .iter()
+            .map(|step| step.phrase)
+            .collect();
+        assert_eq!(
+            phrases,
+            [PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID, PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID]
+        );
+    }
+
+    #[test]
+    fn packed_chain_ends_after_its_groups() {
+        assert_eq!(packed_song().chains[DEFAULT_START_ID].steps[PACKED_PHRASES].phrase, EMPTY_CELL);
+    }
+
+    #[test]
+    fn packed_second_group_transposes_to_the_next_slice() {
+        assert_eq!(packed_song().chains[DEFAULT_START_ID].steps[SLICE_PHRASES].transpose, 1);
+    }
+
+    #[test]
+    fn packed_next_chain_continues_the_slice_numbering() {
+        assert_eq!(packed_song().chains[DEFAULT_START_ID + 1].steps[0].transpose, 2);
+    }
+
+    #[test]
+    fn partly_filled_last_chain_holds_only_the_remaining_slice() {
+        let last = &packed_song().chains[DEFAULT_START_ID + 2];
+        assert_eq!((last.steps[0].transpose, last.steps[SLICE_PHRASES].phrase), (4, EMPTY_CELL));
+    }
+
+    #[test]
+    fn packed_layout_leaves_unneeded_chains_untouched() {
+        assert!(packed_song().chains[DEFAULT_START_ID + 3].is_empty());
+    }
+
+    #[test]
+    fn fully_packed_maximum_slices_still_start_at_the_default_id() {
+        let layout = plan_layout(&empty_song(), MAX_SLICES, &with_chain_phrases(FULLY_PACKED_PHRASES)).unwrap();
+        assert_eq!(layout.start_id, DEFAULT_START_ID);
     }
 
     #[test]

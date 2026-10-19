@@ -1,5 +1,5 @@
 use clap::Parser;
-use ref_inserter::{DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Request, run};
+use ref_inserter::{DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Request, run};
 use std::num::ParseIntError;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -26,6 +26,9 @@ struct Args {
     /// Hex id of the shared phrase every reference chain plays (default F0)
     #[arg(long, value_parser = parse_hex_id)]
     phrase_id: Option<u8>,
+    /// Phrases per chain: 4, 8, 12 or 16, so 1 to 4 slices share a chain (default 4)
+    #[arg(long)]
+    chain_phrases: Option<usize>,
     /// Replace a previous insertion, a used instrument 7F, and existing output files
     #[arg(long)]
     force: bool,
@@ -46,6 +49,7 @@ fn main() -> ExitCode {
         out: args.out,
         empty_id: args.empty_id.unwrap_or(DEFAULT_EMPTY_ID),
         phrase_id: args.phrase_id.unwrap_or(DEFAULT_PHRASE_ID),
+        chain_phrases: args.chain_phrases.unwrap_or(DEFAULT_CHAIN_PHRASES),
         force: args.force,
     };
     match run(&request) {
