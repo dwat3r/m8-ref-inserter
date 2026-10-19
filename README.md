@@ -34,7 +34,7 @@ cargo run --release -- <project.m8s> <reference.wav> \
 | `--bpm` | Tempo of the reference, if it differs from the project tempo |
 | `--dry-run` | Run all checks and print what would change, without writing any file |
 
-The tool prints a summary (slices, chain ids, song rows, slice length in seconds at the tempo used, reference length, shared phrase, sample path). Check the slice length and tempo line: the tool trusts that the reference matches the tempo, and a wrong tempo shows up there as unexpected seconds per slice. The and warnings for anything it replaces. Use `--dry-run` with `--force` to preview a replacement first.
+The tool prints a summary (slices, chain ids, song rows, slice length in seconds at the tempo used, reference length, shared phrase, sample path). Check the slice length and tempo line: the tool trusts that the reference matches the tempo, and a wrong tempo shows up there as unexpected seconds per slice. Warnings are printed for anything it replaces. Use `--dry-run` with `--force` to preview a replacement first.
 
 Copy the WAV and the new project to the M8's SD card.
 
