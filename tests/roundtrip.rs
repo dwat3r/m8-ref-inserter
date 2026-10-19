@@ -1,5 +1,5 @@
-use m8_file_parser::writer::Writer;
 use m8_file_parser::Song;
+use m8_file_parser::writer::Writer;
 
 #[test]
 fn song_roundtrip_is_byte_identical() {

@@ -40,7 +40,10 @@ pub fn used_ids(song: &Song) -> UsedIds {
     );
     UsedIds {
         chains: flag_used(song.chains.iter().map(Chain::is_empty), &chains_in_song),
-        phrases: flag_used(song.phrases.iter().map(Phrase::is_empty), &phrases_in_chains),
+        phrases: flag_used(
+            song.phrases.iter().map(Phrase::is_empty),
+            &phrases_in_chains,
+        ),
     }
 }
 
@@ -93,12 +96,18 @@ mod tests {
 
     #[test]
     fn block_filling_default_range_still_starts_at_default_start() {
-        assert_eq!(block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START), DEFAULT_START);
+        assert_eq!(
+            block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START),
+            DEFAULT_START
+        );
     }
 
     #[test]
     fn block_one_id_over_default_range_starts_one_step_down() {
-        assert_eq!(block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START + 1), ONE_STEP_DOWN);
+        assert_eq!(
+            block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START + 1),
+            ONE_STEP_DOWN
+        );
     }
 
     #[test]

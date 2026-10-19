@@ -71,12 +71,26 @@ pub fn slice_count(wav: &Wav, slice_frames: u32) -> usize {
 
 fn chunk(id: &[u8; 4], payload: &[u8]) -> Vec<u8> {
     let padding = vec![0u8; payload.len() % 2];
-    [id.as_slice(), &(payload.len() as u32).to_le_bytes(), payload, &padding].concat()
+    [
+        id.as_slice(),
+        &(payload.len() as u32).to_le_bytes(),
+        payload,
+        &padding,
+    ]
+    .concat()
 }
 
 fn cue_point(id: u32, start_frame: u32) -> Vec<u8> {
     let zero = 0u32.to_le_bytes();
-    [id.to_le_bytes(), zero, *b"data", zero, zero, start_frame.to_le_bytes()].concat()
+    [
+        id.to_le_bytes(),
+        zero,
+        *b"data",
+        zero,
+        zero,
+        start_frame.to_le_bytes(),
+    ]
+    .concat()
 }
 
 pub fn with_cue_points(wav: &Wav, slice_frames: u32, slices: usize) -> Vec<u8> {
@@ -91,7 +105,12 @@ pub fn with_cue_points(wav: &Wav, slice_frames: u32, slices: usize) -> Vec<u8> {
         chunk(b"cue ", &cue_payload),
     ]
     .concat();
-    [b"RIFF".as_slice(), &(body.len() as u32).to_le_bytes(), &body].concat()
+    [
+        b"RIFF".as_slice(),
+        &(body.len() as u32).to_le_bytes(),
+        &body,
+    ]
+    .concat()
 }
 
 #[cfg(test)]
@@ -172,7 +191,10 @@ mod tests {
     #[test]
     fn cue_point_sample_offset_is_slice_start_frame() {
         let out = sliced(SLICE_FRAMES * 2, 2);
-        assert_eq!(u32_at(&out, cue_chunk_offset(&out) + 12 + 24 + 20), SLICE_FRAMES);
+        assert_eq!(
+            u32_at(&out, cue_chunk_offset(&out) + 12 + 24 + 20),
+            SLICE_FRAMES
+        );
     }
 
     #[test]

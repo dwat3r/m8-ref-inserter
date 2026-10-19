@@ -1,7 +1,10 @@
 use m8_file_parser::{Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
-use ref_inserter::{DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
+use ref_inserter::{
+    DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run,
+    wav,
+};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -146,7 +149,10 @@ fn input_project_is_unchanged() {
 fn instrument_points_at_the_m8_side_sample_path() {
     let workspace = workspace(SLICES);
     run_in(&workspace).unwrap();
-    assert_eq!(reference_sampler(&workspace).sample_path, "/Samples/ref/reference.wav");
+    assert_eq!(
+        reference_sampler(&workspace).sample_path,
+        "/Samples/ref/reference.wav"
+    );
 }
 
 #[test]
@@ -219,7 +225,11 @@ fn existing_output_is_not_overwritten() {
 fn existing_output_is_overwritten_with_force() {
     let workspace = workspace(SLICES);
     std::fs::write(&workspace.out, b"replace me").unwrap();
-    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert_eq!(read_out(&workspace).tempo, fixture_song().tempo);
 }
 
@@ -227,28 +237,47 @@ fn existing_output_is_overwritten_with_force() {
 fn overwriting_an_existing_output_produces_a_warning() {
     let workspace = workspace(SLICES);
     std::fs::write(&workspace.out, b"replace me").unwrap();
-    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let warnings = run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert!(warnings.iter().any(|warning| warning.contains("overwrote")));
 }
 
 #[test]
 fn output_equal_to_input_is_rejected_even_with_force() {
     let workspace = workspace(SLICES);
-    let result = run(&Request { out: workspace.project.clone(), force: true, ..request(&workspace) });
+    let result = run(&Request {
+        out: workspace.project.clone(),
+        force: true,
+        ..request(&workspace)
+    });
     assert!(result.is_err());
 }
 
 #[test]
 fn input_project_is_unchanged_when_output_equals_it_with_force() {
     let workspace = workspace(SLICES);
-    run(&Request { out: workspace.project.clone(), force: true, ..request(&workspace) }).unwrap_err();
-    assert_eq!(std::fs::read(&workspace.project).unwrap(), std::fs::read(PROJECT_FIXTURE).unwrap());
+    run(&Request {
+        out: workspace.project.clone(),
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap_err();
+    assert_eq!(
+        std::fs::read(&workspace.project).unwrap(),
+        std::fs::read(PROJECT_FIXTURE).unwrap()
+    );
 }
 
 #[test]
 fn output_equal_to_input_is_rejected() {
     let workspace = workspace(SLICES);
-    let result = run(&Request { out: workspace.project.clone(), ..request(&workspace) });
+    let result = run(&Request {
+        out: workspace.project.clone(),
+        ..request(&workspace)
+    });
     assert!(result.is_err());
 }
 
@@ -266,14 +295,26 @@ fn existing_copied_wav_is_not_overwritten() {
 fn sample_path_of_maximum_length_is_accepted() {
     let workspace = workspace(SLICES);
     let m8_dir = m8_dir_for_path_len(MAX_SAMPLE_PATH_LEN);
-    assert!(run(&Request { m8_dir, ..request(&workspace) }).is_ok());
+    assert!(
+        run(&Request {
+            m8_dir,
+            ..request(&workspace)
+        })
+        .is_ok()
+    );
 }
 
 #[test]
 fn sample_path_one_over_maximum_length_is_rejected() {
     let workspace = workspace(SLICES);
     let m8_dir = m8_dir_for_path_len(MAX_SAMPLE_PATH_LEN + 1);
-    assert!(run(&Request { m8_dir, ..request(&workspace) }).is_err());
+    assert!(
+        run(&Request {
+            m8_dir,
+            ..request(&workspace)
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -314,7 +355,11 @@ fn unfinished_manual_attempt_is_rejected_without_force() {
 #[test]
 fn force_replaces_an_unfinished_manual_attempt() {
     let workspace = workspace_with_unfinished_manual_attempt();
-    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID)].steps[0];
     assert_eq!(step.phrase, PHRASE_ID);
 }
@@ -322,7 +367,11 @@ fn force_replaces_an_unfinished_manual_attempt() {
 #[test]
 fn force_resets_the_manual_phrase_to_the_reference_note() {
     let workspace = workspace_with_unfinished_manual_attempt();
-    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     let velocity = read_out(&workspace).phrases[usize::from(PHRASE_ID)].steps[0].velocity;
     assert_eq!(velocity, 0xFF);
 }
@@ -330,7 +379,11 @@ fn force_resets_the_manual_phrase_to_the_reference_note() {
 #[test]
 fn overwriting_the_manual_phrase_produces_a_warning() {
     let workspace = workspace_with_unfinished_manual_attempt();
-    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let warnings = run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert!(warnings.iter().any(|warning| warning.contains("F0")));
 }
 
@@ -348,7 +401,13 @@ fn used_default_block_is_rejected() {
 #[test]
 fn used_default_block_that_is_not_a_previous_insertion_is_rejected_even_with_force() {
     let workspace = workspace_with_foreign_default_block();
-    assert!(run(&Request { force: true, ..request(&workspace) }).is_err());
+    assert!(
+        run(&Request {
+            force: true,
+            ..request(&workspace)
+        })
+        .is_err()
+    );
 }
 
 #[test]
@@ -387,7 +446,11 @@ fn rerun_with_force_overwrites_the_copied_wav() {
     run_in(&workspace).unwrap();
     std::fs::write(workspace.dest.join("reference.wav"), b"old").unwrap();
     second_run(&workspace, true).unwrap();
-    assert!(std::fs::read(workspace.dest.join("reference.wav")).unwrap().starts_with(b"RIFF"));
+    assert!(
+        std::fs::read(workspace.dest.join("reference.wav"))
+            .unwrap()
+            .starts_with(b"RIFF")
+    );
 }
 
 #[test]
@@ -399,7 +462,10 @@ fn default_start_id_produces_no_warning() {
 fn run_with_reference_named(workspace: &Workspace, file_name: &str) -> Result<Vec<String>, String> {
     let renamed = workspace.wav.with_file_name(file_name);
     std::fs::rename(&workspace.wav, &renamed).unwrap();
-    run(&Request { reference_wav: renamed, ..request(workspace) })
+    run(&Request {
+        reference_wav: renamed,
+        ..request(workspace)
+    })
 }
 
 #[test]
@@ -413,7 +479,10 @@ fn copied_wav_name_is_an_ascii_slug() {
 fn instrument_path_uses_the_slug() {
     let workspace = workspace(SLICES);
     run_with_reference_named(&workspace, "My Song, v2 \u{2060}final.wav").unwrap();
-    assert_eq!(reference_sampler(&workspace).sample_path, "/Samples/ref/My_Song_v2_final.wav");
+    assert_eq!(
+        reference_sampler(&workspace).sample_path,
+        "/Samples/ref/My_Song_v2_final.wav"
+    );
 }
 
 #[test]
@@ -439,21 +508,33 @@ fn used_reference_slot_is_rejected_without_force() {
 #[test]
 fn force_replaces_a_used_reference_slot() {
     let workspace = workspace_with_used_reference_slot();
-    run(&Request { force: true, ..request(&workspace) }).unwrap();
+    run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert_eq!(reference_sampler(&workspace).name, "REFERENCE");
 }
 
 #[test]
 fn replacing_a_used_reference_slot_produces_a_warning() {
     let workspace = workspace_with_used_reference_slot();
-    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let warnings = run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert!(warnings.iter().any(|warning| warning.contains("7F")));
 }
 
 #[test]
 fn force_on_a_free_reference_slot_produces_no_warning() {
     let workspace = workspace(SLICES);
-    let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
+    let warnings = run(&Request {
+        force: true,
+        ..request(&workspace)
+    })
+    .unwrap();
     assert!(warnings.is_empty());
 }
 
@@ -462,13 +543,20 @@ fn chains_play_the_shared_phrase_transposed_by_slice_index() {
     let workspace = workspace(SLICES);
     run_in(&workspace).unwrap();
     let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID) + SECOND_SLICE].steps[0];
-    assert_eq!((step.phrase, usize::from(step.transpose)), (PHRASE_ID, SECOND_SLICE));
+    assert_eq!(
+        (step.phrase, usize::from(step.transpose)),
+        (PHRASE_ID, SECOND_SLICE)
+    );
 }
 
 #[test]
 fn custom_phrase_id_is_used_by_the_chains() {
     let workspace = workspace(SLICES);
-    run(&Request { phrase_id: CUSTOM_PHRASE_ID, ..request(&workspace) }).unwrap();
+    run(&Request {
+        phrase_id: CUSTOM_PHRASE_ID,
+        ..request(&workspace)
+    })
+    .unwrap();
     let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID)].steps[0];
     assert_eq!(step.phrase, CUSTOM_PHRASE_ID);
 }
@@ -494,25 +582,47 @@ fn track_one_cells(song: &Song, rows: usize) -> Vec<u8> {
 #[test]
 fn packed_run_writes_one_song_row_per_chain() {
     let workspace = workspace(PACKED_SLICES);
-    run(&Request { chain_phrases: PACKED_PHRASES, ..request(&workspace) }).unwrap();
+    run(&Request {
+        chain_phrases: PACKED_PHRASES,
+        ..request(&workspace)
+    })
+    .unwrap();
     let cells = track_one_cells(&read_out(&workspace), PACKED_CHAINS + 1);
     assert_eq!(
         cells,
-        [DEFAULT_START_ID, DEFAULT_START_ID + 1, DEFAULT_START_ID + 2, 0xFF]
+        [
+            DEFAULT_START_ID,
+            DEFAULT_START_ID + 1,
+            DEFAULT_START_ID + 2,
+            0xFF
+        ]
     );
 }
 
 #[test]
 fn rerun_with_force_replaces_a_packed_insertion_with_a_different_packing() {
     let workspace = workspace(PACKED_SLICES);
-    run(&Request { chain_phrases: PACKED_PHRASES, ..request(&workspace) }).unwrap();
+    run(&Request {
+        chain_phrases: PACKED_PHRASES,
+        ..request(&workspace)
+    })
+    .unwrap();
     second_run(&workspace, true).unwrap();
     let song = read_song(&workspace.out.with_file_name("second.m8s"));
-    assert_eq!(track_one_cells(&song, PACKED_SLICES)[PACKED_SLICES - 1], DEFAULT_START_ID + 4);
+    assert_eq!(
+        track_one_cells(&song, PACKED_SLICES)[PACKED_SLICES - 1],
+        DEFAULT_START_ID + 4
+    );
 }
 
 #[test]
 fn chain_phrase_count_that_is_not_a_multiple_of_four_is_rejected() {
     let workspace = workspace(SLICES);
-    assert!(run(&Request { chain_phrases: 6, ..request(&workspace) }).is_err());
+    assert!(
+        run(&Request {
+            chain_phrases: 6,
+            ..request(&workspace)
+        })
+        .is_err()
+    );
 }

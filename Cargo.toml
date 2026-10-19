@@ -2,6 +2,12 @@
 name = "ref_inserter"
 version = "0.1.0"
 edition = "2024"
+description = "Insert a reference song into a Dirtywave M8 project as sliced chains"
+license = "MIT"
+repository = "https://github.com/dwat3r/m8-ref-inserter"
+readme = "README.md"
+keywords = ["m8", "dirtywave", "tracker", "cli"]
+categories = ["command-line-utilities", "multimedia::audio"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }

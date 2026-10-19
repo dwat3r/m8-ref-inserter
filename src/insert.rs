@@ -1,5 +1,7 @@
-use crate::alloc::{ROW_GAP, block_start, block_is_free, last_used_row, used_ids};
-use m8_file_parser::{Chain, Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version};
+use crate::alloc::{ROW_GAP, block_is_free, block_start, last_used_row, used_ids};
+use m8_file_parser::{
+    Chain, Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version,
+};
 
 const SAMPLER_TEMPLATE: &[u8] = include_bytes!("../assets/sampler.m8i");
 pub const REF_INSTRUMENT_SLOT: u8 = 0x7F;
@@ -67,14 +69,23 @@ pub fn reference_slot_is_free(song: &Song) -> bool {
 pub fn plan_layout(song: &Song, slices: usize, options: &Options) -> Result<Layout, String> {
     let Version { major, minor, .. } = song.version;
     if (major, minor) != SUPPORTED_FIRMWARE {
-        return Err(format!("only FW 6.6 projects are supported, found {major}.{minor}"));
+        return Err(format!(
+            "only FW 6.6 projects are supported, found {major}.{minor}"
+        ));
     }
     if !(1..=MAX_SLICES).contains(&slices) {
-        return Err(format!("reference needs {slices} slices, supported range is 1 to {MAX_SLICES}"));
+        return Err(format!(
+            "reference needs {slices} slices, supported range is 1 to {MAX_SLICES}"
+        ));
     }
     let chain_phrases = options.chain_phrases;
-    if chain_phrases == 0 || chain_phrases > MAX_CHAIN_PHRASES || chain_phrases % PHRASES_PER_SLICE != 0 {
-        return Err(format!("chain phrases must be 4, 8, 12 or 16, got {chain_phrases}"));
+    if chain_phrases == 0
+        || chain_phrases > MAX_CHAIN_PHRASES
+        || !chain_phrases.is_multiple_of(PHRASES_PER_SLICE)
+    {
+        return Err(format!(
+            "chain phrases must be 4, 8, 12 or 16, got {chain_phrases}"
+        ));
     }
     let chains = slices.div_ceil(chain_phrases / PHRASES_PER_SLICE);
     let empty = usize::from(options.empty);
@@ -85,7 +96,10 @@ pub fn plan_layout(song: &Song, slices: usize, options: &Options) -> Result<Layo
         return Err(format!("phrase id {:02X} is out of range", options.phrase));
     }
     if options.phrase == options.empty {
-        return Err(format!("phrase id {:02X} must differ from the empty id", options.phrase));
+        return Err(format!(
+            "phrase id {:02X} must differ from the empty id",
+            options.phrase
+        ));
     }
     if !is_silent_chain(&song.chains[empty], options.empty) || !song.phrases[empty].is_empty() {
         return Err(format!(
@@ -108,17 +122,28 @@ pub fn plan_layout(song: &Song, slices: usize, options: &Options) -> Result<Layo
         ));
     }
     if (start_id..start_id + chains).contains(&empty) {
-        return Err(format!("empty id {:02X} lies inside the reference chain block", options.empty));
+        return Err(format!(
+            "empty id {:02X} lies inside the reference chain block",
+            options.empty
+        ));
     }
     let start_row = last_used_row(&song.song).map_or(0, |row| row + 1 + ROW_GAP);
     if start_row + chains > SongSteps::ROW_COUNT {
-        return Err(format!("song view has no room for {chains} rows from row {start_row}"));
+        return Err(format!(
+            "song view has no room for {chains} rows from row {start_row}"
+        ));
     }
-    Ok(Layout { start_id, start_row, slices, options: *options })
+    Ok(Layout {
+        start_id,
+        start_row,
+        slices,
+        options: *options,
+    })
 }
 
 pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), String> {
-    song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(blank_sampler(sample_path)?);
+    song.instruments[usize::from(REF_INSTRUMENT_SLOT)] =
+        Instrument::Sampler(blank_sampler(sample_path)?);
     song.phrases[usize::from(layout.options.phrase)].steps[0] = Step {
         note: Note(FIRST_SLICE_NOTE),
         velocity: UNSET_VELOCITY,
@@ -136,7 +161,8 @@ pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), 
             .for_each(|step| step.phrase = layout.options.empty);
     });
     (0..layout.chains()).for_each(|chain| {
-        song.song.steps[(layout.start_row + chain) * SongSteps::TRACK_COUNT] = (layout.start_id + chain) as u8;
+        song.song.steps[(layout.start_row + chain) * SongSteps::TRACK_COUNT] =
+            (layout.start_id + chain) as u8;
     });
     (1..SongSteps::TRACK_COUNT).for_each(|track| {
         song.song.steps[layout.start_row * SongSteps::TRACK_COUNT + track] = layout.options.empty;
@@ -154,7 +180,11 @@ mod tests {
     const PATH: &str = "/Samples/ref/song.wav";
     const EMPTY_ID: u8 = 0xFE;
     const PHRASE_ID: u8 = DEFAULT_PHRASE_ID;
-    const OPTIONS: Options = Options { empty: EMPTY_ID, phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
+    const OPTIONS: Options = Options {
+        empty: EMPTY_ID,
+        phrase: PHRASE_ID,
+        chain_phrases: DEFAULT_CHAIN_PHRASES,
+    };
     const SLICES: usize = 3;
     const DEFAULT_START_ID: usize = 0xC0;
     const EMPTY_CELL: u8 = 0xFF;
@@ -207,7 +237,8 @@ mod tests {
 
     fn song_with_used_reference_slot() -> Song {
         let mut song = empty_song();
-        song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(blank_sampler(PATH).unwrap());
+        song.instruments[usize::from(REF_INSTRUMENT_SLOT)] =
+            Instrument::Sampler(blank_sampler(PATH).unwrap());
         song
     }
 
@@ -257,7 +288,12 @@ mod tests {
         let layout = plan(&empty_song(), SLICES).unwrap();
         assert_eq!(
             layout,
-            Layout { start_id: DEFAULT_START_ID, start_row: 0, slices: SLICES, options: OPTIONS }
+            Layout {
+                start_id: DEFAULT_START_ID,
+                start_row: 0,
+                slices: SLICES,
+                options: OPTIONS
+            }
         );
     }
 
@@ -286,13 +322,21 @@ mod tests {
 
     #[test]
     fn phrase_id_equal_to_empty_id_is_rejected() {
-        let ids = Options { empty: EMPTY_ID, phrase: EMPTY_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
+        let ids = Options {
+            empty: EMPTY_ID,
+            phrase: EMPTY_ID,
+            chain_phrases: DEFAULT_CHAIN_PHRASES,
+        };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
     #[test]
     fn phrase_id_outside_phrase_range_is_rejected() {
-        let ids = Options { empty: EMPTY_ID, phrase: EMPTY_CELL, chain_phrases: DEFAULT_CHAIN_PHRASES };
+        let ids = Options {
+            empty: EMPTY_ID,
+            phrase: EMPTY_CELL,
+            chain_phrases: DEFAULT_CHAIN_PHRASES,
+        };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
@@ -358,13 +402,21 @@ mod tests {
 
     #[test]
     fn empty_id_inside_the_block_is_rejected() {
-        let ids = Options { empty: id(1), phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
+        let ids = Options {
+            empty: id(1),
+            phrase: PHRASE_ID,
+            chain_phrases: DEFAULT_CHAIN_PHRASES,
+        };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
     #[test]
     fn empty_id_outside_chain_range_is_rejected() {
-        let ids = Options { empty: EMPTY_CELL, phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
+        let ids = Options {
+            empty: EMPTY_CELL,
+            phrase: PHRASE_ID,
+            chain_phrases: DEFAULT_CHAIN_PHRASES,
+        };
         assert!(plan_layout(&empty_song(), SLICES, &ids).is_err());
     }
 
@@ -393,19 +445,25 @@ mod tests {
     #[test]
     fn other_tracks_get_empty_chain_at_start_row() {
         let song = applied_song();
-        let cells: Vec<u8> = (1..TRACKS).map(|track| song_cell(&song, 0, track)).collect();
+        let cells: Vec<u8> = (1..TRACKS)
+            .map(|track| song_cell(&song, 0, track))
+            .collect();
         assert_eq!(cells, [EMPTY_ID; TRACKS - 1]);
     }
 
     #[test]
     fn other_tracks_stay_empty_after_start_row() {
-        assert_eq!(song_cell(&applied_song(), SECOND_ROW, SECOND_TRACK), EMPTY_CELL);
+        assert_eq!(
+            song_cell(&applied_song(), SECOND_ROW, SECOND_TRACK),
+            EMPTY_CELL
+        );
     }
 
     #[test]
     fn every_chain_plays_the_shared_phrase_then_three_empty_phrases() {
         let song = applied_song();
-        let phrases: Vec<u8> = song.chains[DEFAULT_START_ID + SECOND_SLICE].steps[..SLICE_CHAIN_LEN]
+        let phrases: Vec<u8> = song.chains[DEFAULT_START_ID + SECOND_SLICE].steps
+            [..SLICE_CHAIN_LEN]
             .iter()
             .map(|step| step.phrase)
             .collect();
@@ -415,19 +473,28 @@ mod tests {
     #[test]
     fn chain_steps_after_the_fourth_stay_empty() {
         let song = applied_song();
-        assert_eq!(song.chains[DEFAULT_START_ID].steps[SLICE_CHAIN_LEN].phrase, EMPTY_CELL);
+        assert_eq!(
+            song.chains[DEFAULT_START_ID].steps[SLICE_CHAIN_LEN].phrase,
+            EMPTY_CELL
+        );
     }
 
     #[test]
     fn chain_transposes_the_shared_phrase_by_its_slice_index() {
         let song = applied_song();
-        assert_eq!(song.chains[DEFAULT_START_ID + SECOND_SLICE].steps[0].transpose, SECOND_SLICE as u8);
+        assert_eq!(
+            song.chains[DEFAULT_START_ID + SECOND_SLICE].steps[0].transpose,
+            SECOND_SLICE as u8
+        );
     }
 
     #[test]
     fn empty_phrase_steps_of_a_chain_are_not_transposed() {
         let song = applied_song();
-        assert_eq!(song.chains[DEFAULT_START_ID + SECOND_SLICE].steps[SECOND_ROW].transpose, 0);
+        assert_eq!(
+            song.chains[DEFAULT_START_ID + SECOND_SLICE].steps[SECOND_ROW].transpose,
+            0
+        );
     }
 
     #[test]
@@ -439,7 +506,10 @@ mod tests {
     #[test]
     fn shared_phrase_row_zero_uses_the_reference_instrument() {
         let song = applied_song();
-        assert_eq!(song.phrases[usize::from(PHRASE_ID)].steps[0].instrument, REF_INSTRUMENT_SLOT);
+        assert_eq!(
+            song.phrases[usize::from(PHRASE_ID)].steps[0].instrument,
+            REF_INSTRUMENT_SLOT
+        );
     }
 
     #[test]
@@ -460,7 +530,8 @@ mod tests {
     #[test]
     fn reference_instrument_is_installed_in_slot_7f() {
         let song = applied_song();
-        let Instrument::Sampler(sampler) = &song.instruments[usize::from(REF_INSTRUMENT_SLOT)] else {
+        let Instrument::Sampler(sampler) = &song.instruments[usize::from(REF_INSTRUMENT_SLOT)]
+        else {
             panic!("slot 7F is not a sampler");
         };
         assert_eq!(sampler.sample_path, PATH);
@@ -484,7 +555,10 @@ mod tests {
     }
 
     fn with_chain_phrases(chain_phrases: usize) -> Options {
-        Options { chain_phrases, ..OPTIONS }
+        Options {
+            chain_phrases,
+            ..OPTIONS
+        }
     }
 
     #[test]
@@ -531,29 +605,43 @@ mod tests {
             .collect();
         assert_eq!(
             phrases,
-            [PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID, PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID]
+            [
+                PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID, PHRASE_ID, EMPTY_ID, EMPTY_ID, EMPTY_ID
+            ]
         );
     }
 
     #[test]
     fn packed_chain_ends_after_its_groups() {
-        assert_eq!(packed_song().chains[DEFAULT_START_ID].steps[PACKED_PHRASES].phrase, EMPTY_CELL);
+        assert_eq!(
+            packed_song().chains[DEFAULT_START_ID].steps[PACKED_PHRASES].phrase,
+            EMPTY_CELL
+        );
     }
 
     #[test]
     fn packed_second_group_transposes_to_the_next_slice() {
-        assert_eq!(packed_song().chains[DEFAULT_START_ID].steps[SLICE_PHRASES].transpose, 1);
+        assert_eq!(
+            packed_song().chains[DEFAULT_START_ID].steps[SLICE_PHRASES].transpose,
+            1
+        );
     }
 
     #[test]
     fn packed_next_chain_continues_the_slice_numbering() {
-        assert_eq!(packed_song().chains[DEFAULT_START_ID + 1].steps[0].transpose, 2);
+        assert_eq!(
+            packed_song().chains[DEFAULT_START_ID + 1].steps[0].transpose,
+            2
+        );
     }
 
     #[test]
     fn partly_filled_last_chain_holds_only_the_remaining_slice() {
         let last = &packed_song().chains[DEFAULT_START_ID + 2];
-        assert_eq!((last.steps[0].transpose, last.steps[SLICE_PHRASES].phrase), (4, EMPTY_CELL));
+        assert_eq!(
+            (last.steps[0].transpose, last.steps[SLICE_PHRASES].phrase),
+            (4, EMPTY_CELL)
+        );
     }
 
     #[test]
@@ -563,7 +651,12 @@ mod tests {
 
     #[test]
     fn fully_packed_maximum_slices_still_start_at_the_default_id() {
-        let layout = plan_layout(&empty_song(), MAX_SLICES, &with_chain_phrases(FULLY_PACKED_PHRASES)).unwrap();
+        let layout = plan_layout(
+            &empty_song(),
+            MAX_SLICES,
+            &with_chain_phrases(FULLY_PACKED_PHRASES),
+        )
+        .unwrap();
         assert_eq!(layout.start_id, DEFAULT_START_ID);
     }
 

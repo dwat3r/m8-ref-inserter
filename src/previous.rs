@@ -33,7 +33,11 @@ fn phrase_plays_reference(song: &Song, id: usize) -> bool {
 }
 
 fn chain_phrases_match(song: &Song, id: usize, first_phrase: u8, empty_id: u8) -> bool {
-    let phrases: Vec<u8> = song.chains[id].steps.iter().map(|step| step.phrase).collect();
+    let phrases: Vec<u8> = song.chains[id]
+        .steps
+        .iter()
+        .map(|step| step.phrase)
+        .collect();
     let expected: Vec<u8> = [first_phrase, empty_id, empty_id, empty_id]
         .into_iter()
         .chain(std::iter::repeat(EMPTY_CELL))
@@ -67,7 +71,11 @@ fn is_own_phrase_chain(song: &Song, id: usize, options: &Options) -> bool {
 }
 
 fn is_lone_reference_note(song: &Song, id: usize) -> bool {
-    let filled: Vec<_> = song.phrases[id].steps.iter().filter(|row| !row.is_empty()).collect();
+    let filled: Vec<_> = song.phrases[id]
+        .steps
+        .iter()
+        .filter(|row| !row.is_empty())
+        .collect();
     matches!(
         filled.as_slice(),
         [only] if !only.note.is_empty() && only.instrument == REF_INSTRUMENT_SLOT
@@ -93,18 +101,33 @@ fn owned_by_reference(song: &Song, options: &Options) -> (Vec<usize>, Vec<usize>
 pub fn previous_insertion(song: &Song, options: &Options) -> PreviousInsertion {
     let (chains, phrases) = owned_by_reference(song, options);
     let phrase = usize::from(options.phrase);
-    let stray_phrase = (!phrases.contains(&phrase) && is_lone_reference_note(song, phrase)).then_some(phrase);
-    PreviousInsertion { chains, phrases, stray_phrase }
+    let stray_phrase =
+        (!phrases.contains(&phrase) && is_lone_reference_note(song, phrase)).then_some(phrase);
+    PreviousInsertion {
+        chains,
+        phrases,
+        stray_phrase,
+    }
 }
 
 pub fn clear_previous(song: &mut Song, previous: &PreviousInsertion, empty_id: u8) {
-    previous.chains.iter().for_each(|&id| song.chains[id].clear());
-    previous.phrases.iter().for_each(|&id| song.phrases[id].clear());
+    previous
+        .chains
+        .iter()
+        .for_each(|&id| song.chains[id].clear());
+    previous
+        .phrases
+        .iter()
+        .for_each(|&id| song.phrases[id].clear());
     if let Some(phrase) = previous.stray_phrase {
         song.phrases[phrase].clear();
     }
     let rows: Vec<usize> = (0..SongSteps::ROW_COUNT)
-        .filter(|&row| previous.chains.contains(&usize::from(song.song.steps[row * TRACKS])))
+        .filter(|&row| {
+            previous
+                .chains
+                .contains(&usize::from(song.song.steps[row * TRACKS]))
+        })
         .collect();
     rows.iter()
         .for_each(|&row| song.song.steps[row * TRACKS] = EMPTY_CELL);
@@ -121,14 +144,18 @@ pub fn clear_previous(song: &mut Song, previous: &PreviousInsertion, empty_id: u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DEFAULT_CHAIN_PHRASES, DEFAULT_PHRASE_ID};
     use crate::alloc::{DEFAULT_START, last_used_row, used_ids};
     use crate::insert::{apply, blank_sampler, plan_layout};
+    use crate::{DEFAULT_CHAIN_PHRASES, DEFAULT_PHRASE_ID};
     use m8_file_parser::{Note, Step};
 
     const EMPTY_ID: u8 = 0xFE;
     const PHRASE_ID: u8 = DEFAULT_PHRASE_ID;
-    const OPTIONS: Options = Options { empty: EMPTY_ID, phrase: PHRASE_ID, chain_phrases: DEFAULT_CHAIN_PHRASES };
+    const OPTIONS: Options = Options {
+        empty: EMPTY_ID,
+        phrase: PHRASE_ID,
+        chain_phrases: DEFAULT_CHAIN_PHRASES,
+    };
     const SLICES: usize = 3;
     const OLD_LAYOUT_CHAINS: usize = 2;
     const PACKED_PHRASES: usize = 8;
@@ -211,7 +238,10 @@ mod tests {
 
     fn with_packed_reference() -> Song {
         let mut song = fixture();
-        let packed = Options { chain_phrases: PACKED_PHRASES, ..OPTIONS };
+        let packed = Options {
+            chain_phrases: PACKED_PHRASES,
+            ..OPTIONS
+        };
         let layout = plan_layout(&song, PACKED_SLICES, &packed).unwrap();
         apply(&mut song, &layout, PATH).unwrap();
         song
@@ -236,7 +266,11 @@ mod tests {
     fn packed_chain_with_a_broken_group_is_not_previous() {
         let mut song = with_packed_reference();
         song.chains[DEFAULT_START].steps[5].phrase = 1;
-        assert!(!previous_insertion(&song, &OPTIONS).chains.contains(&DEFAULT_START));
+        assert!(
+            !previous_insertion(&song, &OPTIONS)
+                .chains
+                .contains(&DEFAULT_START)
+        );
     }
 
     #[test]
@@ -248,14 +282,22 @@ mod tests {
     fn chain_breaking_the_pattern_is_not_previous() {
         let mut song = with_reference(fixture());
         song.chains[DEFAULT_START].steps[1].phrase = 1;
-        assert!(!previous_insertion(&song, &OPTIONS).chains.contains(&DEFAULT_START));
+        assert!(
+            !previous_insertion(&song, &OPTIONS)
+                .chains
+                .contains(&DEFAULT_START)
+        );
     }
 
     #[test]
     fn transposed_empty_step_breaks_the_pattern() {
         let mut song = with_reference(fixture());
         song.chains[DEFAULT_START].steps[1].transpose = 1;
-        assert!(!previous_insertion(&song, &OPTIONS).chains.contains(&DEFAULT_START));
+        assert!(
+            !previous_insertion(&song, &OPTIONS)
+                .chains
+                .contains(&DEFAULT_START)
+        );
     }
 
     #[test]
@@ -265,7 +307,10 @@ mod tests {
             panic!("slot 7F is not a sampler");
         };
         sampler.name = String::new();
-        assert_eq!(previous_insertion(&song, &OPTIONS).chains, chain_ids(DEFAULT_START, SLICES));
+        assert_eq!(
+            previous_insertion(&song, &OPTIONS).chains,
+            chain_ids(DEFAULT_START, SLICES)
+        );
     }
 
     #[test]
@@ -291,13 +336,19 @@ mod tests {
     #[test]
     fn lone_note_on_instrument_7f_in_the_phrase_slot_is_a_stray_phrase() {
         let song = song_with_phrase_rows(&[(0, SLOT as u8)]);
-        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, Some(usize::from(PHRASE_ID)));
+        assert_eq!(
+            previous_insertion(&song, &OPTIONS).stray_phrase,
+            Some(usize::from(PHRASE_ID))
+        );
     }
 
     #[test]
     fn lone_note_on_a_later_row_is_still_a_stray_phrase() {
         let song = song_with_phrase_rows(&[(3, SLOT as u8)]);
-        assert_eq!(previous_insertion(&song, &OPTIONS).stray_phrase, Some(usize::from(PHRASE_ID)));
+        assert_eq!(
+            previous_insertion(&song, &OPTIONS).stray_phrase,
+            Some(usize::from(PHRASE_ID))
+        );
     }
 
     #[test]

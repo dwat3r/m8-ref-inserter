@@ -53,14 +53,20 @@ fn is_same_file(first: &Path, second: &Path) -> bool {
 
 fn refuse_existing(path: &Path) -> Result<(), String> {
     if path.exists() {
-        return Err(format!("{} already exists, refusing to overwrite", path.display()));
+        return Err(format!(
+            "{} already exists, refusing to overwrite",
+            path.display()
+        ));
     }
     Ok(())
 }
 
 pub fn run(request: &Request) -> Result<Vec<String>, String> {
     if is_same_file(&request.project, &request.out) {
-        return Err(format!("{} is the input project, refusing to overwrite it", request.out.display()));
+        return Err(format!(
+            "{} is the input project, refusing to overwrite it",
+            request.out.display()
+        ));
     }
     if !request.force {
         refuse_existing(&request.out)?;
@@ -104,7 +110,9 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     let file_name = format!("{stem}.wav");
     let sample_path = format!("{}/{file_name}", request.m8_dir.trim_end_matches('/'));
     if sample_path.len() > MAX_SAMPLE_PATH_LEN {
-        return Err(format!("sample path {sample_path} is longer than {MAX_SAMPLE_PATH_LEN} characters"));
+        return Err(format!(
+            "sample path {sample_path} is longer than {MAX_SAMPLE_PATH_LEN} characters"
+        ));
     }
     let copied_wav = request.dest_dir.join(&file_name);
     if !request.force {
@@ -116,20 +124,34 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     song.write(&mut writer)?;
 
     create_dir(&request.dest_dir)?;
-    write_file(&copied_wav, &wav::with_cue_points(&reference, slice_frames, slices))?;
+    write_file(
+        &copied_wav,
+        &wav::with_cue_points(&reference, slice_frames, slices),
+    )?;
     write_file(&request.out, &writer.finish())?;
 
     let previous_warning = (!previous.is_empty()).then(|| {
-        format!("warning: replaced a previous reference insertion ({} chains)", previous.chains.len())
+        format!(
+            "warning: replaced a previous reference insertion ({} chains)",
+            previous.chains.len()
+        )
     });
     let instrument_warning = (replaces_instrument && previous.is_empty())
         .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
     let stray_warning = previous.stray_phrase.filter(|_| request.force).map(|phrase| {
         format!("warning: overwrote phrase {phrase:02X}, it held a single note on instrument {REF_INSTRUMENT_SLOT:02X}")
     });
-    let output_warning = overwrites_output
-        .then(|| format!("warning: overwrote existing {}", request.out.display()));
-    Ok([previous_warning, stray_warning, instrument_warning, output_warning].into_iter().flatten().collect())
+    let output_warning =
+        overwrites_output.then(|| format!("warning: overwrote existing {}", request.out.display()));
+    Ok([
+        previous_warning,
+        stray_warning,
+        instrument_warning,
+        output_warning,
+    ]
+    .into_iter()
+    .flatten()
+    .collect())
 }
 
 #[cfg(test)]

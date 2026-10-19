@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(about = "Insert a reference WAV into an M8 (FW 6.6) project as sliced chains")]
+#[command(
+    version,
+    about = "Insert a reference WAV into an M8 (FW 6.6) project as sliced chains"
+)]
 struct Args {
     /// M8 project file to read
     project: PathBuf,
