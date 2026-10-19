@@ -17,7 +17,7 @@ pub struct UsedIds {
 }
 
 pub fn block_is_free(start: usize, block_size: usize, used: &UsedIds) -> bool {
-    (start..start + block_size).all(|id| !used.chains[id] && !used.phrases[id])
+    (start..start + block_size).all(|id| !used.chains[id])
 }
 
 fn referenced_ids(cells: impl Iterator<Item = u8>) -> HashSet<u8> {
@@ -118,9 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn used_phrase_in_block_makes_it_not_free() {
+    fn used_phrase_among_the_ids_leaves_the_block_free() {
         let used = only_used(&[], &[DEFAULT_START]);
-        assert!(!block_is_free(DEFAULT_START, SMALL_BLOCK, &used));
+        assert!(block_is_free(DEFAULT_START, SMALL_BLOCK, &used));
     }
 
     #[test]

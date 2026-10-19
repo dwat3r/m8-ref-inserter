@@ -3,14 +3,15 @@ pub mod insert;
 pub mod previous;
 pub mod wav;
 
-use insert::{REF_INSTRUMENT_SLOT, apply, plan_layout, reference_slot_is_free};
+use insert::{REF_INSTRUMENT_SLOT, SpecialIds, apply, plan_layout, reference_slot_is_free};
 use m8_file_parser::Song;
 use m8_file_parser::writer::Writer;
-use previous::{clear_previous, previous_reference_chains};
+use previous::{clear_previous, previous_insertion};
 use std::path::{Path, PathBuf};
 
 pub const MAX_SAMPLE_PATH_LEN: usize = 127;
 pub const DEFAULT_EMPTY_ID: u8 = 0xFE;
+pub const DEFAULT_PHRASE_ID: u8 = 0xF0;
 
 pub struct Request {
     pub project: PathBuf,
@@ -19,6 +20,7 @@ pub struct Request {
     pub m8_dir: String,
     pub out: PathBuf,
     pub empty_id: u8,
+    pub phrase_id: u8,
     pub force: bool,
 }
 
@@ -68,12 +70,13 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     let reference = wav::parse(&read_file(&request.reference_wav)?)?;
     let slice_frames = wav::slice_frames(reference.sample_rate, song.tempo);
     let slices = wav::slice_count(&reference, slice_frames);
-    let previous = previous_reference_chains(&song, request.empty_id);
+    let ids = SpecialIds { empty: request.empty_id, phrase: request.phrase_id };
+    let previous = previous_insertion(&song, &ids);
     let replaces_instrument = !reference_slot_is_free(&song);
     if request.force {
-        clear_previous(&mut song, &previous, request.empty_id);
+        clear_previous(&mut song, &previous, ids.empty);
     }
-    let layout = plan_layout(&song, slices, request.empty_id)?;
+    let layout = plan_layout(&song, slices, &ids)?;
     if replaces_instrument && !request.force {
         return Err(format!(
             "instrument {REF_INSTRUMENT_SLOT:02X} is already used, pass --force to replace it"
@@ -111,7 +114,7 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     write_file(&request.out, &writer.finish())?;
 
     let previous_warning = (!previous.is_empty()).then(|| {
-        format!("warning: replaced a previous reference insertion ({} chains)", previous.len())
+        format!("warning: replaced a previous reference insertion ({} chains)", previous.chains.len())
     });
     let instrument_warning = (replaces_instrument && previous.is_empty())
         .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));

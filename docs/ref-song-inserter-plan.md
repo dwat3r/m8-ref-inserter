@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- CLI: `ref_inserter <project.m8s> <ref.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it, e.g. /Samples/ref> --out <new.m8s> [--empty-id <hex, default FE>]`
+- CLI: `ref_inserter <project.m8s> <ref.wav> --dest-dir <local dir> --m8-dir <dir as the M8 sees it, e.g. /Samples/ref> --out <new.m8s> [--empty-id <hex, default FE>] [--phrase-id <hex, default F0>] [--force]`
 - FW 6.6 only. A project with another version is an error. The crate's `Song::write` panics on files older than 6.5 anyway.
 - Input project is never modified. Only `--out` and the copied WAV are written.
 - BPM comes from `Song.tempo`. Reference is trusted to match. Audio starts at beat 0, no offset.
@@ -18,13 +18,13 @@
 - Slice length = 16 beats = round(960 * sample_rate / bpm) frames. Slices N = ceil(total_frames / slice_frames); the partial tail is a slice.
 - N > 128: error, before any write. Error if N == 0.
 - Instrument 7f: Sampler, name `REFERENCE`, play mode FWD, slice param 01, other params default. If 7f is already used: error, unless `--force` (replaces it with a warning; a previous insertion's instrument is replaced silently as part of that insertion).
-- Ids: chains and phrases use block [start, start + N), start = `min(0xC0, (0xF0 - N) / 0x10 * 0x10)` (C0 up to 48 slices, then B0 up to 64, A0 up to 80, 90 up to 96, 80 up to 112, 70 up to 128). No shifting for used ids: if any chain id or phrase id in the block is used, abort with a message that suggests `--force`.
+- Ids: reference chains use the block [start, start + N), start = `min(0xC0, (0xF0 - N) / 0x10 * 0x10)` (C0 up to 48 slices, then B0 up to 64, A0 up to 80, 90 up to 96, 80 up to 112, 70 up to 128). Only chain ids are consumed there. The one shared phrase uses `--phrase-id` (default F0, must differ from the empty id). No shifting for used ids: if any chain id in the block is used, or the phrase id is used, abort with a message that suggests `--force`.
 - "Used" chain = non-empty chain or referenced by a song cell. "Used" phrase = non-empty phrase or referenced by a chain step.
 - Empty id E (default FE): phrase E must be empty and chain E must be silent (every step is phrase E or 0xFF; an existing `[E, E, E, E]` chain is accepted and left untouched), else error. Error if E is inside the chosen block.
-- Phrase k (k = 0..N-1): row 0 = note k (C-1 = byte 0 = slice 1, +1 per semitone), instrument 7f. Chain k = [phrase k, E, E, E, rest 0xFF].
+- Shared phrase P (`--phrase-id`): row 0 = note 0 (C-1, slice 1), velocity unset, instrument 7f, other rows empty. Chain k (k = 0..N-1) = `[P with transpose k, E, E, E, rest 0xFF]`, so the chain transpose selects slice k+1 (sampler TRANSP is on in the template; unverified on hardware).
 - Song view: reference on track 1 (index 0). Start row = last used row across all tracks + 1 + 8 (empty song: row 0). Track 1 rows start_row..start_row+N get chain ids start..start+N. Tracks 2 to 8 get chain E at start_row only. Error if start_row + N > 0x100.
 - Never overwrite existing chains, phrases, song cells. `--force` removes only a previous insertion of this tool, identified by its signature, and replaces instrument 7f. Anything else in the way aborts even with `--force`.
-- Previous-insertion signature (`previous.rs`): instrument 7f is a Sampler named `REFERENCE`, and chain c (c < 0xF0) is ours when its steps are `[c, E, E, E]` followed by empty steps and phrase c has a note at row 0 with instrument 7f and all other rows empty. `--force` clears those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row, then inserts fresh. It also overwrites an existing copied WAV and warns that a previous insertion was replaced. `--out` and an existing copied WAV are overwritten only with `--force` (with a warning for `--out`). The input project is never overwritten: `--out` resolving to the same file as the input is refused even with `--force`.
+- Previous-insertion signature (`previous.rs`): instrument 7f is a Sampler named `REFERENCE`, and either (new layout) chain c < 0xF0 has phrases `[P, E, E, E]` then empty steps with zero transpose after step 0, and phrase P plays the reference; or (old layout, one phrase per chain) chain c is `[c, E, E, E]` and phrase c plays the reference. `--force` clears those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row, then inserts fresh. It also overwrites an existing copied WAV and an existing `--out`, and warns. The input project is never overwritten.
 - WAV is copied to `<dest-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)`. Sample path stored in the instrument: `<m8-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)` (max 127 chars).
 - Split files and 7e spill are out of scope (error at N > 128 instead).
 
@@ -34,7 +34,7 @@
 - `src/main.rs`: args, IO, orchestration. No logic.
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
 - `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free`.
-- `src/previous.rs`: `previous_reference_chains`, `clear_previous`.
+- `src/previous.rs`: `PreviousInsertion`, `previous_insertion`, `clear_previous`.
 - `src/insert.rs`: `plan_layout`, `apply`.
 - `tests/fixtures/V6_6EMPTY.m8s`: copied from the crate repo `examples/songs/`.
 - `tests/e2e.rs`: end-to-end test via the library functions.
@@ -173,8 +173,8 @@ Tests cover: `block_start` for small blocks, 48, 49 and 128 ids; `block_is_free`
 **Interfaces:**
 - Consumes: Task 3 helpers.
 - Produces:
-  - `#[derive(Debug, PartialEq)] pub struct Layout { pub start_id: usize, pub start_row: usize, pub slices: usize, pub empty_id: u8 }`
-  - `pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, String>`
+  - `#[derive(Debug, Clone, Copy, PartialEq)] pub struct SpecialIds { pub empty: u8, pub phrase: u8 }` and `#[derive(Debug, PartialEq)] pub struct Layout { pub start_id: usize, pub start_row: usize, pub slices: usize, pub ids: SpecialIds }`
+  - `pub fn plan_layout(song: &Song, slices: usize, ids: &SpecialIds) -> Result<Layout, String>`
   - `pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), String>` (Err only when the sampler template is unusable)
 
 - [ ] **Step 1: Failing tests** on the fixture: (0) `V6EMPTY.m8s` (FW 6.0, read-only fixture copied for this test) returns Err mentioning FW 6.6, and the 6.6 fixture passes the check; (a) empty song, 3 slices, E=FE: layout `{start_id: 0xC0, start_row: 0, slices: 3}`; (b) slices = 129 returns Err mentioning 128; (c) slices = 0 returns Err; (d) instrument 7f non-empty returns Err; (e) chain FE non-empty returns Err; (f) phrase FE non-empty returns Err; (g) E = 0xC1 with block C0..C3 returns Err; (h) song with chain at row 255 returns Err (start_row + N > 0x100); (i) after `apply` on (a): `song.song.steps[0]` = 0xC0, `steps[1*8]` = 0xC1, `steps[2*8]` = 0xC2, `steps[1]` (track 2, row 0) = 0xFE, `steps[7]` = 0xFE, `steps[8 + 1]` (track 2, row 1) = 0xFF; `chains[0xC0].steps[0..4]` phrases = [0xC0, 0xFE, 0xFE, 0xFE], `steps[4].phrase == 0xFF`; `phrases[0xC1].steps[0].note == Note(1)` and `.instrument == 0x7F`, other steps of that phrase empty; `instruments[0x7F]` is a Sampler named `REFERENCE` with the given path; (j) song with last used row 4: start_row == 13.

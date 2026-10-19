@@ -1,7 +1,7 @@
 use m8_file_parser::{Instrument, SamplePlayMode, Sampler, Song, SongSteps};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
-use ref_inserter::{DEFAULT_EMPTY_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
+use ref_inserter::{DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -9,6 +9,9 @@ const PROJECT_FIXTURE: &str = "tests/fixtures/V6_6EMPTY.m8s";
 const SAMPLE_RATE: u32 = 100;
 const M8_DIR: &str = "/Samples/ref";
 const EMPTY_ID: u8 = DEFAULT_EMPTY_ID;
+const PHRASE_ID: u8 = DEFAULT_PHRASE_ID;
+const CUSTOM_PHRASE_ID: u8 = 0xEF;
+const SECOND_SLICE: usize = 1;
 const SLICES: usize = 3;
 const DEFAULT_START_ID: u8 = DEFAULT_START as u8;
 
@@ -77,6 +80,7 @@ fn request(workspace: &Workspace) -> Request {
         m8_dir: M8_DIR.to_string(),
         out: workspace.out.clone(),
         empty_id: EMPTY_ID,
+        phrase_id: PHRASE_ID,
         force: false,
     }
 }
@@ -398,4 +402,28 @@ fn force_on_a_free_reference_slot_produces_no_warning() {
     let workspace = workspace(SLICES);
     let warnings = run(&Request { force: true, ..request(&workspace) }).unwrap();
     assert!(warnings.is_empty());
+}
+
+#[test]
+fn chains_play_the_shared_phrase_transposed_by_slice_index() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID) + SECOND_SLICE].steps[0];
+    assert_eq!((step.phrase, usize::from(step.transpose)), (PHRASE_ID, SECOND_SLICE));
+}
+
+#[test]
+fn custom_phrase_id_is_used_by_the_chains() {
+    let workspace = workspace(SLICES);
+    run(&Request { phrase_id: CUSTOM_PHRASE_ID, ..request(&workspace) }).unwrap();
+    let step = read_out(&workspace).chains[usize::from(DEFAULT_START_ID)].steps[0];
+    assert_eq!(step.phrase, CUSTOM_PHRASE_ID);
+}
+
+#[test]
+fn used_phrase_id_is_rejected() {
+    let mut song = fixture_song();
+    song.phrases[usize::from(PHRASE_ID)].steps[0].instrument = 1;
+    let workspace = workspace_with(&serialized(&song), &wav_bytes(frames_for_slices(SLICES)));
+    assert!(run_in(&workspace).is_err());
 }

@@ -1,5 +1,5 @@
 use clap::Parser;
-use ref_inserter::{DEFAULT_EMPTY_ID, Request, run};
+use ref_inserter::{DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Request, run};
 use std::num::ParseIntError;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -23,6 +23,9 @@ struct Args {
     /// Hex id of the empty chain and phrase (default FE)
     #[arg(long, value_parser = parse_hex_id)]
     empty_id: Option<u8>,
+    /// Hex id of the shared phrase every reference chain plays (default F0)
+    #[arg(long, value_parser = parse_hex_id)]
+    phrase_id: Option<u8>,
     /// Replace a previous insertion, a used instrument 7F, and existing output files
     #[arg(long)]
     force: bool,
@@ -42,6 +45,7 @@ fn main() -> ExitCode {
         m8_dir: args.m8_dir,
         out: args.out,
         empty_id: args.empty_id.unwrap_or(DEFAULT_EMPTY_ID),
+        phrase_id: args.phrase_id.unwrap_or(DEFAULT_PHRASE_ID),
         force: args.force,
     };
     match run(&request) {
