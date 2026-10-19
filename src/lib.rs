@@ -1,11 +1,12 @@
 pub mod alloc;
 pub mod insert;
+pub mod previous;
 pub mod wav;
 
-use alloc::DEFAULT_START;
 use insert::{REF_INSTRUMENT_SLOT, apply, plan_layout, reference_slot_is_free};
 use m8_file_parser::Song;
 use m8_file_parser::writer::Writer;
+use previous::{clear_previous, previous_reference_chains};
 use std::path::{Path, PathBuf};
 
 pub const MAX_SAMPLE_PATH_LEN: usize = 127;
@@ -57,8 +58,12 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     let reference = wav::parse(&read_file(&request.reference_wav)?)?;
     let slice_frames = wav::slice_frames(reference.sample_rate, song.tempo);
     let slices = wav::slice_count(&reference, slice_frames);
-    let layout = plan_layout(&song, slices, request.empty_id)?;
+    let previous = previous_reference_chains(&song, request.empty_id);
     let replaces_instrument = !reference_slot_is_free(&song);
+    if request.force {
+        clear_previous(&mut song, &previous, request.empty_id);
+    }
+    let layout = plan_layout(&song, slices, request.empty_id)?;
     if replaces_instrument && !request.force {
         return Err(format!(
             "instrument {REF_INSTRUMENT_SLOT:02X} is already used, pass --force to replace it"
@@ -83,7 +88,9 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
         return Err(format!("sample path {sample_path} is longer than {MAX_SAMPLE_PATH_LEN} characters"));
     }
     let copied_wav = request.dest_dir.join(&file_name);
-    refuse_existing(&copied_wav)?;
+    if !request.force {
+        refuse_existing(&copied_wav)?;
+    }
 
     apply(&mut song, &layout, &sample_path)?;
     let mut writer = Writer::new(project_bytes);
@@ -93,15 +100,12 @@ pub fn run(request: &Request) -> Result<Vec<String>, String> {
     write_file(&copied_wav, &wav::with_cue_points(&reference, slice_frames, slices))?;
     write_file(&request.out, &writer.finish())?;
 
-    let instrument_warning = replaces_instrument
-        .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
-    let ids_warning = (layout.start_id != DEFAULT_START).then(|| {
-        format!(
-            "warning: reference ids start at {:02X} instead of {DEFAULT_START:02X}, that block is in use",
-            layout.start_id
-        )
+    let previous_warning = (!previous.is_empty()).then(|| {
+        format!("warning: replaced a previous reference insertion ({} chains)", previous.len())
     });
-    Ok([ids_warning, instrument_warning].into_iter().flatten().collect())
+    let instrument_warning = (replaces_instrument && previous.is_empty())
+        .then(|| format!("warning: replaced existing instrument {REF_INSTRUMENT_SLOT:02X}"));
+    Ok([previous_warning, instrument_warning].into_iter().flatten().collect())
 }
 
 #[cfg(test)]

@@ -1,8 +1,9 @@
-use crate::alloc::{ID_LIMIT, ROW_GAP, last_used_row, pick_start, used_ids};
+use crate::alloc::{ROW_GAP, block_is_free, block_start, last_used_row, used_ids};
 use m8_file_parser::{Chain, Instrument, Note, SamplePlayMode, Sampler, Song, SongSteps, Step, Version};
 
 const SAMPLER_TEMPLATE: &[u8] = include_bytes!("../assets/sampler.m8i");
 pub const REF_INSTRUMENT_SLOT: u8 = 0x7F;
+pub const REFERENCE_NAME: &str = "REFERENCE";
 const FIRST_SLICE: u8 = 1;
 const SUPPORTED_FIRMWARE: (u8, u8) = (6, 6);
 pub const MAX_SLICES: usize = 128;
@@ -22,7 +23,7 @@ pub fn blank_sampler(sample_path: &str) -> Result<Sampler, String> {
     match template.instrument {
         Instrument::Sampler(sampler) => Ok(Sampler {
             number: REF_INSTRUMENT_SLOT,
-            name: "REFERENCE".to_string(),
+            name: REFERENCE_NAME.to_string(),
             sample_path: sample_path.to_string(),
             play_mode: SamplePlayMode::FWD,
             slice: FIRST_SLICE,
@@ -58,8 +59,13 @@ pub fn plan_layout(song: &Song, slices: usize, empty_id: u8) -> Result<Layout, S
     if !is_silent_chain(&song.chains[empty], empty_id) || !song.phrases[empty].is_empty() {
         return Err(format!("chain {empty_id:02X} is not silent or phrase {empty_id:02X} is not empty"));
     }
-    let start_id = pick_start(slices, &used_ids(song))
-        .ok_or(format!("no free block of {slices} chain and phrase ids below {ID_LIMIT:02X}"))?;
+    let start_id = block_start(slices);
+    if !block_is_free(start_id, slices, &used_ids(song)) {
+        return Err(format!(
+            "chain or phrase ids {start_id:02X} to {:02X} are already used, the reference may already be inserted, pass --force to replace a previous insertion",
+            start_id + slices - 1
+        ));
+    }
     if (start_id..start_id + slices).contains(&empty) {
         return Err(format!("empty id {empty_id:02X} lies inside the reference id block"));
     }
@@ -95,6 +101,7 @@ pub fn apply(song: &mut Song, layout: &Layout, sample_path: &str) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alloc::ALIGN;
     use m8_file_parser::{Note, SamplePlayMode, SongSteps};
 
     const PATH: &str = "/Samples/ref/song.wav";
@@ -163,6 +170,20 @@ mod tests {
             layout,
             Layout { start_id: DEFAULT_START_ID, start_row: 0, slices: SLICES, empty_id: EMPTY_ID }
         );
+    }
+
+    #[test]
+    fn used_default_block_is_rejected_with_a_force_hint() {
+        let mut song = empty_song();
+        song.chains[DEFAULT_START_ID].steps[0].phrase = ANY_PHRASE;
+        let err = plan_layout(&song, SLICES, EMPTY_ID).unwrap_err();
+        assert!(err.contains("--force"));
+    }
+
+    #[test]
+    fn more_slices_than_the_default_range_start_one_step_down() {
+        let layout = plan_layout(&empty_song(), 49, EMPTY_ID).unwrap();
+        assert_eq!(layout.start_id, DEFAULT_START_ID - ALIGN);
     }
 
     #[test]

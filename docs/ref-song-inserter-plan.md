@@ -17,13 +17,14 @@
 - WAV only (PCM). Anything else: error telling the user to convert.
 - Slice length = 16 beats = round(960 * sample_rate / bpm) frames. Slices N = ceil(total_frames / slice_frames); the partial tail is a slice.
 - N > 128: error, before any write. Error if N == 0.
-- Instrument 7f: Sampler, name `REFERENCE`, play mode FWD, slice param 01, other params default. If 7f is already used: error, unless `--force`, which replaces it and prints a warning. `reference_slot_is_free(song)` in `insert.rs` is checked by `run`, not by `plan_layout`.
-- Ids: chains and phrases use block [start, 0xF0), N ids each. Start aligned to 0x10, candidates C0, B0, A0, 90, ... descending. For N > 48 first candidate is the highest aligned start with start + N <= 0xF0. Pick first block where every chain id and phrase id is unused. Warn when start != C0. Error if none fits.
+- Instrument 7f: Sampler, name `REFERENCE`, play mode FWD, slice param 01, other params default. If 7f is already used: error, unless `--force` (replaces it with a warning; a previous insertion's instrument is replaced silently as part of that insertion).
+- Ids: chains and phrases use block [start, start + N), start = `min(0xC0, (0xF0 - N) / 0x10 * 0x10)` (C0 up to 48 slices, then B0 up to 64, A0 up to 80, 90 up to 96, 80 up to 112, 70 up to 128). No shifting for used ids: if any chain id or phrase id in the block is used, abort with a message that suggests `--force`.
 - "Used" chain = non-empty chain or referenced by a song cell. "Used" phrase = non-empty phrase or referenced by a chain step.
 - Empty id E (default FE): phrase E must be empty and chain E must be silent (every step is phrase E or 0xFF; an existing `[E, E, E, E]` chain is accepted and left untouched), else error. Error if E is inside the chosen block.
 - Phrase k (k = 0..N-1): row 0 = note k (C-1 = byte 0 = slice 1, +1 per semitone), instrument 7f. Chain k = [phrase k, E, E, E, rest 0xFF].
 - Song view: reference on track 1 (index 0). Start row = last used row across all tracks + 1 + 8 (empty song: row 0). Track 1 rows start_row..start_row+N get chain ids start..start+N. Tracks 2 to 8 get chain E at start_row only. Error if start_row + N > 0x100.
-- Never overwrite existing chains, phrases, song cells. Instrument 7f is replaced only with `--force`.
+- Never overwrite existing chains, phrases, song cells. `--force` removes only a previous insertion of this tool, identified by its signature, and replaces instrument 7f. Anything else in the way aborts even with `--force`.
+- Previous-insertion signature (`previous.rs`): instrument 7f is a Sampler named `REFERENCE`, and chain c (c < 0xF0) is ours when its steps are `[c, E, E, E]` followed by empty steps and phrase c has a note at row 0 with instrument 7f and all other rows empty. `--force` clears those chains and phrases, their track 1 song cells, and the E cells on tracks 2 to 8 on the first reference row, then inserts fresh. It also overwrites an existing copied WAV and warns that a previous insertion was replaced. `--out` is never overwritten.
 - WAV is copied to `<dest-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)`. Sample path stored in the instrument: `<m8-dir>/<slug>.wav, where slug = the wav file stem with each run of characters outside [A-Za-z0-9_-] replaced by one `_` and leading/trailing `_` trimmed (error if empty)` (max 127 chars).
 - Split files and 7e spill are out of scope (error at N > 128 instead).
 
@@ -32,7 +33,8 @@
 - `Cargo.toml`: deps.
 - `src/main.rs`: args, IO, orchestration. No logic.
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
-- `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `pick_start`.
+- `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free`.
+- `src/previous.rs`: `previous_reference_chains`, `clear_previous`.
 - `src/insert.rs`: `plan_layout`, `apply`.
 - `tests/fixtures/V6_6EMPTY.m8s`: copied from the crate repo `examples/songs/`.
 - `tests/e2e.rs`: end-to-end test via the library functions.
@@ -157,10 +159,10 @@ mod tests {
   - `pub const ID_LIMIT: usize = 0xF0; pub const DEFAULT_START: usize = 0xC0; pub const ALIGN: usize = 0x10; pub const ROW_GAP: usize = 8;`
   - `pub struct UsedIds { pub chains: Vec<bool>, pub phrases: Vec<bool> }` (lens `Song::N_CHAINS`, `Song::N_PHRASES`)
   - `pub fn used_ids(song: &Song) -> UsedIds`: chain used = non-empty or referenced by a song cell != 0xFF; phrase used = non-empty or referenced by a chain step != 0xFF.
-  - `pub fn pick_start(block_size: usize, used: &UsedIds) -> Option<usize>`: first candidate of `min(0xC0, (0xF0 - block_size) / 0x10 * 0x10)` stepping down by 0x10 to 0x00 whose block `[start, start + block_size)` has no used chain or phrase id.
+  - `pub fn block_start(block_size: usize) -> usize` = `min(0xC0, (0xF0 - block_size) / 0x10 * 0x10)`; `pub fn block_is_free(start: usize, block_size: usize, used: &UsedIds) -> bool`.
   - `pub fn last_used_row(steps: &SongSteps) -> Option<usize>`: `None` for an empty song. Do not use `SongSteps::last_modified_row` (returns 256 for an empty song).
 
-Tests cover: start at C0 for small blocks and for 48 ids, B0 for 49, 0x70 for 128, a used chain or phrase in the block shifting down one step, a used id just past the block not shifting, everything used giving `None`, `used_ids` on the empty fixture and with content or references, `last_used_row` on empty and filled songs.
+Tests cover: `block_start` for small blocks, 48, 49 and 128 ids; `block_is_free` with a used chain or phrase in the block and a used id just past it; `used_ids` on the empty fixture and with content or references; `last_used_row` on empty and filled songs.
 
 ### Task 4: Validate and apply to Song
 
@@ -177,7 +179,7 @@ Tests cover: start at C0 for small blocks and for 48 ids, B0 for 49, 0x70 for 12
 
 - [ ] **Step 1: Failing tests** on the fixture: (0) `V6EMPTY.m8s` (FW 6.0, read-only fixture copied for this test) returns Err mentioning FW 6.6, and the 6.6 fixture passes the check; (a) empty song, 3 slices, E=FE: layout `{start_id: 0xC0, start_row: 0, slices: 3}`; (b) slices = 129 returns Err mentioning 128; (c) slices = 0 returns Err; (d) instrument 7f non-empty returns Err; (e) chain FE non-empty returns Err; (f) phrase FE non-empty returns Err; (g) E = 0xC1 with block C0..C3 returns Err; (h) song with chain at row 255 returns Err (start_row + N > 0x100); (i) after `apply` on (a): `song.song.steps[0]` = 0xC0, `steps[1*8]` = 0xC1, `steps[2*8]` = 0xC2, `steps[1]` (track 2, row 0) = 0xFE, `steps[7]` = 0xFE, `steps[8 + 1]` (track 2, row 1) = 0xFF; `chains[0xC0].steps[0..4]` phrases = [0xC0, 0xFE, 0xFE, 0xFE], `steps[4].phrase == 0xFF`; `phrases[0xC1].steps[0].note == Note(1)` and `.instrument == 0x7F`, other steps of that phrase empty; `instruments[0x7F]` is a Sampler named `REFERENCE` with the given path; (j) song with last used row 4: start_row == 13.
 - [ ] **Step 2:** `cargo test insert`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `plan_layout` checks in this order: `song.version.major == 6 && song.version.minor == 6` else Err("only FW 6.6 projects are supported, found X.Y"), slices in 1..=128, chain E silent (every step phrase E or 0xFF) and phrase E empty (`Phrase::is_empty`), `pick_start` or Err("no free block of N chain+phrase ids below 0xF0"), E not in block, `start_row = last_used_row.map_or(0, |r| r + 1 + ROW_GAP)`, `start_row + slices <= SongSteps::ROW_COUNT`. `apply`: set `instruments[0x7F] = Instrument::Sampler(blank_sampler(...))`; for k in 0..slices set phrase `start_id + k` step 0 to `Step { note: Note(k as u8), velocity: 0xFF (unset, as the crate marks an empty velocity; `Step::default()` would give 0), instrument: 0x7F, ..Default::default() }`, set chain `start_id + k` steps 0..4 phrases to `[start_id + k, E, E, E]` with E = `layout.empty_id`; set `steps[(start_row + k) * 8] = (start_id + k) as u8`; for tracks 1..8 set `steps[start_row * 8 + t] = E`. Also error when `empty_id >= Song::N_CHAINS` (0xFF is the empty-cell marker). Build with iterator `for_each`/`map`, no mutable counters.
+- [ ] **Step 3: Implement.** `plan_layout` checks in this order (block start via `block_start`, abort with a `--force` hint when `block_is_free` is false instead of picking another start): `song.version.major == 6 && song.version.minor == 6` else Err("only FW 6.6 projects are supported, found X.Y"), slices in 1..=128, chain E silent (every step phrase E or 0xFF) and phrase E empty (`Phrase::is_empty`), `pick_start` or Err("no free block of N chain+phrase ids below 0xF0"), E not in block, `start_row = last_used_row.map_or(0, |r| r + 1 + ROW_GAP)`, `start_row + slices <= SongSteps::ROW_COUNT`. `apply`: set `instruments[0x7F] = Instrument::Sampler(blank_sampler(...))`; for k in 0..slices set phrase `start_id + k` step 0 to `Step { note: Note(k as u8), velocity: 0xFF (unset, as the crate marks an empty velocity; `Step::default()` would give 0), instrument: 0x7F, ..Default::default() }`, set chain `start_id + k` steps 0..4 phrases to `[start_id + k, E, E, E]` with E = `layout.empty_id`; set `steps[(start_row + k) * 8] = (start_id + k) as u8`; for tracks 1..8 set `steps[start_row * 8 + t] = E`. Also error when `empty_id >= Song::N_CHAINS` (0xFF is the empty-cell marker). Build with iterator `for_each`/`map`, no mutable counters.
 - [ ] **Step 4:** `cargo test insert`. Expected: PASS.
 
 ### Task 5: CLI and end-to-end

@@ -7,9 +7,8 @@ pub const ALIGN: usize = 0x10;
 pub const ROW_GAP: usize = 8;
 const EMPTY_CELL: u8 = 0xFF;
 
-fn candidate_starts(block_size: usize) -> Vec<usize> {
-    let highest = DEFAULT_START.min((ID_LIMIT - block_size) / ALIGN * ALIGN);
-    (0..=highest / ALIGN).rev().map(|step| step * ALIGN).collect()
+pub fn block_start(block_size: usize) -> usize {
+    DEFAULT_START.min((ID_LIMIT - block_size) / ALIGN * ALIGN)
 }
 
 pub struct UsedIds {
@@ -17,10 +16,8 @@ pub struct UsedIds {
     pub phrases: Vec<bool>,
 }
 
-pub fn pick_start(block_size: usize, used: &UsedIds) -> Option<usize> {
-    candidate_starts(block_size).into_iter().find(|&start| {
-        (start..start + block_size).all(|id| !used.chains[id] && !used.phrases[id])
-    })
+pub fn block_is_free(start: usize, block_size: usize, used: &UsedIds) -> bool {
+    (start..start + block_size).all(|id| !used.chains[id] && !used.phrases[id])
 }
 
 fn referenced_ids(cells: impl Iterator<Item = u8>) -> HashSet<u8> {
@@ -91,52 +88,45 @@ mod tests {
 
     #[test]
     fn small_block_starts_at_default_start() {
-        assert_eq!(pick_start(SMALL_BLOCK, &none_used()), Some(DEFAULT_START));
+        assert_eq!(block_start(SMALL_BLOCK), DEFAULT_START);
     }
 
     #[test]
     fn block_filling_default_range_still_starts_at_default_start() {
-        assert_eq!(
-            pick_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START, &none_used()),
-            Some(DEFAULT_START)
-        );
+        assert_eq!(block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START), DEFAULT_START);
     }
 
     #[test]
     fn block_one_id_over_default_range_starts_one_step_down() {
-        assert_eq!(
-            pick_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START + 1, &none_used()),
-            Some(ONE_STEP_DOWN)
-        );
+        assert_eq!(block_start(IDS_BELOW_LIMIT_FROM_DEFAULT_START + 1), ONE_STEP_DOWN);
     }
 
     #[test]
     fn max_slices_block_ends_exactly_at_id_limit() {
-        assert_eq!(pick_start(MAX_SLICES, &none_used()), Some(ID_LIMIT - MAX_SLICES));
+        assert_eq!(block_start(MAX_SLICES), ID_LIMIT - MAX_SLICES);
     }
 
     #[test]
-    fn used_chain_in_block_shifts_start_down_one_step() {
+    fn untouched_block_is_free() {
+        assert!(block_is_free(DEFAULT_START, SMALL_BLOCK, &none_used()));
+    }
+
+    #[test]
+    fn used_chain_in_block_makes_it_not_free() {
         let used = only_used(&[LAST_ID_IN_SMALL_BLOCK], &[]);
-        assert_eq!(pick_start(SMALL_BLOCK, &used), Some(ONE_STEP_DOWN));
+        assert!(!block_is_free(DEFAULT_START, SMALL_BLOCK, &used));
     }
 
     #[test]
-    fn used_phrase_in_block_shifts_start_down_one_step() {
+    fn used_phrase_in_block_makes_it_not_free() {
         let used = only_used(&[], &[DEFAULT_START]);
-        assert_eq!(pick_start(SMALL_BLOCK, &used), Some(ONE_STEP_DOWN));
+        assert!(!block_is_free(DEFAULT_START, SMALL_BLOCK, &used));
     }
 
     #[test]
-    fn used_id_just_past_the_block_does_not_shift_start() {
+    fn used_id_just_past_the_block_leaves_it_free() {
         let used = only_used(&[FIRST_ID_PAST_SMALL_BLOCK], &[]);
-        assert_eq!(pick_start(SMALL_BLOCK, &used), Some(DEFAULT_START));
-    }
-
-    #[test]
-    fn everything_used_yields_none() {
-        let all_chains: Vec<usize> = (0..Song::N_CHAINS).collect();
-        assert_eq!(pick_start(1, &only_used(&all_chains, &[])), None);
+        assert!(block_is_free(DEFAULT_START, SMALL_BLOCK, &used));
     }
 
     #[test]

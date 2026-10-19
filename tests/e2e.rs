@@ -2,7 +2,7 @@ use m8_file_parser::{Instrument, SamplePlayMode, Sampler, Song, SongSteps};
 use ref_inserter::alloc::DEFAULT_START;
 use ref_inserter::insert::{MAX_SLICES, REF_INSTRUMENT_SLOT, blank_sampler};
 use ref_inserter::{DEFAULT_EMPTY_ID, MAX_SAMPLE_PATH_LEN, Request, run, wav};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 const PROJECT_FIXTURE: &str = "tests/fixtures/V6_6EMPTY.m8s";
@@ -11,7 +11,6 @@ const M8_DIR: &str = "/Samples/ref";
 const EMPTY_ID: u8 = DEFAULT_EMPTY_ID;
 const SLICES: usize = 3;
 const DEFAULT_START_ID: u8 = DEFAULT_START as u8;
-const NEXT_BLOCK_START_ID: u8 = 0xB0;
 
 struct Workspace {
     _dir: TempDir,
@@ -98,8 +97,27 @@ fn reference_sampler(workspace: &Workspace) -> Sampler {
     sampler.clone()
 }
 
+fn read_song(path: &Path) -> Song {
+    Song::read(&mut std::fs::read(path).unwrap().as_slice()).unwrap()
+}
+
 fn read_out(workspace: &Workspace) -> Song {
-    Song::read(&mut std::fs::read(&workspace.out).unwrap().as_slice()).unwrap()
+    read_song(&workspace.out)
+}
+
+fn serialized(song: &Song) -> Vec<u8> {
+    let mut writer = m8_file_parser::writer::Writer::new(std::fs::read(PROJECT_FIXTURE).unwrap());
+    song.write(&mut writer).unwrap();
+    writer.finish()
+}
+
+fn second_run(workspace: &Workspace, force: bool) -> Result<Vec<String>, String> {
+    run(&Request {
+        project: workspace.out.clone(),
+        out: workspace.out.with_file_name("second.m8s"),
+        force,
+        ..request(workspace)
+    })
 }
 
 #[test]
@@ -229,15 +247,60 @@ fn non_wav_reference_is_rejected() {
     assert!(run_in(&workspace).is_err());
 }
 
-#[test]
-fn shifted_start_id_produces_a_warning() {
+fn workspace_with_foreign_default_block() -> Workspace {
     let mut song = fixture_song();
     song.chains[usize::from(DEFAULT_START_ID)].steps[0].phrase = 1;
-    let mut writer = m8_file_parser::writer::Writer::new(std::fs::read(PROJECT_FIXTURE).unwrap());
-    song.write(&mut writer).unwrap();
-    let workspace = workspace_with(&writer.finish(), &wav_bytes(frames_for_slices(SLICES)));
-    let warnings = run_in(&workspace).unwrap();
-    assert!(warnings[0].contains(&format!("{NEXT_BLOCK_START_ID:02X}")));
+    workspace_with(&serialized(&song), &wav_bytes(frames_for_slices(SLICES)))
+}
+
+#[test]
+fn used_default_block_is_rejected() {
+    assert!(run_in(&workspace_with_foreign_default_block()).is_err());
+}
+
+#[test]
+fn used_default_block_that_is_not_a_previous_insertion_is_rejected_even_with_force() {
+    let workspace = workspace_with_foreign_default_block();
+    assert!(run(&Request { force: true, ..request(&workspace) }).is_err());
+}
+
+#[test]
+fn rerun_on_own_output_is_rejected_without_force() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    assert!(second_run(&workspace, false).is_err());
+}
+
+#[test]
+fn rerun_with_force_rebuilds_the_reference_chains() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    second_run(&workspace, true).unwrap();
+    let song = read_song(&workspace.out.with_file_name("second.m8s"));
+    let cells: Vec<u8> = (0..SLICES)
+        .map(|row| song.song.steps[row * SongSteps::TRACK_COUNT])
+        .collect();
+    assert_eq!(
+        cells,
+        [DEFAULT_START_ID, DEFAULT_START_ID + 1, DEFAULT_START_ID + 2]
+    );
+}
+
+#[test]
+fn rerun_with_force_warns_about_the_replacement() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    let warnings = second_run(&workspace, true).unwrap();
+    assert!(warnings.iter().any(|warning| warning.contains("previous")));
+}
+
+#[test]
+fn rerun_with_force_overwrites_the_copied_wav() {
+    let workspace = workspace(SLICES);
+    run_in(&workspace).unwrap();
+    std::fs::write(workspace.dest.join("reference.wav"), b"old").unwrap();
+    second_run(&workspace, true).unwrap();
+    assert!(std::fs::read(workspace.dest.join("reference.wav")).unwrap().starts_with(b"RIFF"));
 }
 
 #[test]
@@ -273,14 +336,11 @@ fn reference_name_without_any_ascii_letters_or_digits_is_rejected() {
 }
 
 fn workspace_with_used_reference_slot() -> Workspace {
-    let project_bytes = std::fs::read(PROJECT_FIXTURE).unwrap();
     let mut song = fixture_song();
     let mut old_sampler = blank_sampler("/old.wav").unwrap();
     old_sampler.name = "OLD".to_string();
     song.instruments[usize::from(REF_INSTRUMENT_SLOT)] = Instrument::Sampler(old_sampler);
-    let mut writer = m8_file_parser::writer::Writer::new(project_bytes);
-    song.write(&mut writer).unwrap();
-    workspace_with(&writer.finish(), &wav_bytes(frames_for_slices(SLICES)))
+    workspace_with(&serialized(&song), &wav_bytes(frames_for_slices(SLICES)))
 }
 
 #[test]
