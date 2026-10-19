@@ -51,11 +51,14 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 - `src/wav.rs`: `Wav`, `parse`, `slice_frames`, `slice_count`, `with_cue_points`.
 - `src/alloc.rs`: `UsedIds`, `used_ids`, `last_used_row`, `block_start`, `block_is_free` (chain ids only), constants `ID_LIMIT`, `DEFAULT_START`, `ALIGN`, `ROW_GAP`.
 - `src/insert.rs`: `Options { empty, phrase, chain_phrases }`, `Layout`, `blank_sampler`, `reference_slot_is_free`, `plan_layout`, `apply`, `REF_INSTRUMENT_SLOT`, `REFERENCE_NAME`, `MAX_SLICES`, `PHRASES_PER_SLICE`.
-- `src/previous.rs`: `PreviousInsertion { chains, phrases, stray_phrase }`, `previous_insertion`, `clear_previous`.
+- `src/inspect.rs`: `inspect(project, options) -> Result<Vec<String>, String>` for the `inspect` subcommand: FW and tempo, instrument 7F, previous insertion (chain count and range, slice count, track 1 song rows, layout and phrases per chain), stray phrase.
+- `src/previous.rs`: `PreviousInsertion { chains, phrases, stray_phrase }`, `previous_insertion`, `slice_groups`, `clear_previous`.
 - `assets/sampler.m8i`: sampler template.
 - `tests/fixtures/V6_6EMPTY.m8s`, `tests/fixtures/V6EMPTY.m8s`: from the crate repo; the FW 6.0 one only tests the version check.
 - `tests/roundtrip.rs`: `Song` read then write is byte identical.
-- `tests/e2e.rs`: `run` end to end on generated WAVs in temp dirs.
+- `tests/e2e.rs`: `run` and `inspect` end to end on generated WAVs in temp dirs.
+- `tests/cli.rs`: the built binary: `--version`, bare insert still works, missing arguments, `inspect`, `--help`.
+- `tests/common/mod.rs`: the shared WAV generator.
 - `README.md`, `LICENSE` (MIT).
 - `.github/workflows/ci.yml`: on push and pull request to `master`, and on `v*` tags. Matrix: macOS arm64 (tests, build), macOS x86_64 (cross-compiled on the arm64 runner, build only, to avoid paid Intel runners), Linux x86_64 and Windows x86_64 (tests, build). Each job packages `ref_inserter-<target>.tar.gz` (binary, README, LICENSE) as a workflow artifact; a tag push also creates a GitHub Release with `gh release create` and attaches the archives.
 
@@ -69,6 +72,10 @@ ref_inserter <project.m8s> <reference.wav> --dest-dir <local dir> --m8-dir <dir 
 6. `apply` and serialize the song in memory.
 7. Only then (and only without `--dry-run`) create `--dest-dir`, write the WAV, write `--out`.
 8. Return a `Report`; `main` prints its warnings to stderr and its summary (slice and chain counts, chain ids, song rows, shared phrase, sample path, written or dry run) to stdout.
+
+## `inspect`
+
+`ref_inserter inspect <project> [--empty-id] [--phrase-id]` is an optional subcommand. The bare insert form keeps working (`args_conflicts_with_subcommands` and `subcommand_negates_reqs`, with the insert arguments as an optional flattened group). It is read only.
 
 ## `--dry-run`
 
