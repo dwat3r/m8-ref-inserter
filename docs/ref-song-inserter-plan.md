@@ -85,7 +85,8 @@ Runs every check and the full in-memory build, including all refusals (existing 
 
 - Unit tests in each module cover the behavior above, one concept per test, including boundaries: 48 and 49 chains, 128 slices, an exact row fit, 127 and 128 character sample paths.
 - E2E tests cover output files, input untouched, reruns with and without `--force`, packed layouts, custom phrase id, an unfinished manual attempt, foreign content refusals, existing file refusals.
-- A mutation check (breaking the chain transpose) was caught by exactly the matching test.
+- Property tests (e2e) loop over slice counts 1, 4, 5, 49 and 128 and chain phrases 4, 8, 12 and 16: a forced rerun reproduces the original byte for byte (also next to existing song content), and switching packing with `--force` equals a fresh insert of the new packing.
+- Mutation checks: breaking the chain transpose, the clearing of old phrases, and the clearing of the silent track cells are each caught by the matching tests.
 
 ## Decisions and history
 

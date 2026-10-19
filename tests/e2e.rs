@@ -915,3 +915,92 @@ fn inspect_rejects_a_missing_file() {
     let workspace = workspace(SLICES);
     assert!(inspect(&workspace.out, &INSPECT_OPTIONS).is_err());
 }
+
+const SLICE_COUNTS: [usize; 5] = [1, 4, 5, 49, 128];
+const PACKINGS: [usize; 4] = [4, 8, 12, 16];
+const FOREIGN_CHAIN: u8 = 5;
+
+fn slices_and_packings() -> impl Iterator<Item = (usize, usize)> {
+    SLICE_COUNTS
+        .iter()
+        .flat_map(|&slices| PACKINGS.iter().map(move |&packing| (slices, packing)))
+}
+
+fn insert_with(workspace: &Workspace, chain_phrases: usize) -> Vec<u8> {
+    run(&Request {
+        chain_phrases,
+        ..request(workspace)
+    })
+    .unwrap();
+    std::fs::read(&workspace.out).unwrap()
+}
+
+fn force_over_output(workspace: &Workspace, chain_phrases: usize) -> Vec<u8> {
+    let second = workspace.out.with_file_name("second.m8s");
+    run(&Request {
+        project: workspace.out.clone(),
+        out: second.clone(),
+        chain_phrases,
+        force: true,
+        ..request(workspace)
+    })
+    .unwrap();
+    std::fs::read(second).unwrap()
+}
+
+fn rerun_reproduces(workspace: &Workspace, chain_phrases: usize) -> bool {
+    let first = insert_with(workspace, chain_phrases);
+    force_over_output(workspace, chain_phrases) == first
+}
+
+#[test]
+fn force_rerun_reproduces_the_original_for_every_slice_count_and_packing() {
+    let mismatches: Vec<(usize, usize)> = slices_and_packings()
+        .filter(|&(slices, packing)| !rerun_reproduces(&workspace(slices), packing))
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "differing (slices, packing): {mismatches:?}"
+    );
+}
+
+#[test]
+fn force_rerun_reproduces_the_original_next_to_existing_song_content() {
+    let mut song = fixture_song();
+    song.song.steps[0] = FOREIGN_CHAIN;
+    let mismatches: Vec<(usize, usize)> = slices_and_packings()
+        .filter(|&(slices, packing)| {
+            let wav = wav_bytes(frames_for_slices(slices));
+            !rerun_reproduces(&workspace_with(&serialized(&song), &wav), packing)
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "differing (slices, packing): {mismatches:?}"
+    );
+}
+
+#[test]
+fn changing_the_packing_with_force_matches_a_fresh_insert_of_the_new_packing() {
+    let mismatches: Vec<(usize, usize, usize)> = [5usize, 49, 128]
+        .into_iter()
+        .flat_map(|slices| {
+            PACKINGS.iter().flat_map(move |&old| {
+                PACKINGS
+                    .iter()
+                    .filter(move |&&new| new != old)
+                    .map(move |&new| (slices, old, new))
+            })
+        })
+        .filter(|&(slices, old, new)| {
+            let converted = workspace(slices);
+            insert_with(&converted, old);
+            let fresh = workspace(slices);
+            force_over_output(&converted, new) != insert_with(&fresh, new)
+        })
+        .collect();
+    assert!(
+        mismatches.is_empty(),
+        "differing (slices, old, new): {mismatches:?}"
+    );
+}
