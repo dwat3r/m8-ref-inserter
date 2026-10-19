@@ -3,6 +3,8 @@ pub mod insert;
 pub mod inspect;
 pub mod previous;
 pub mod wav;
+#[cfg(target_arch = "wasm32")]
+mod web;
 
 use insert::{Layout, Options, REF_INSTRUMENT_SLOT, apply, plan_layout, reference_slot_is_free};
 use m8_file_parser::Song;
@@ -36,13 +38,28 @@ pub struct Source<'a> {
     pub reference_name: &'a str,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Settings {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub m8_dir: String,
     pub empty_id: u8,
     pub phrase_id: u8,
     pub chain_phrases: usize,
     pub force: bool,
     pub bpm: Option<f32>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            m8_dir: String::new(),
+            empty_id: DEFAULT_EMPTY_ID,
+            phrase_id: DEFAULT_PHRASE_ID,
+            chain_phrases: DEFAULT_CHAIN_PHRASES,
+            force: false,
+            bpm: None,
+        }
+    }
 }
 
 impl From<&Request> for Settings {
@@ -59,12 +76,18 @@ impl From<&Request> for Settings {
 }
 
 #[derive(Debug)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
 pub struct Insertion {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub project: Vec<u8>,
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub wav: Vec<u8>,
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub file_name: String,
     pub slices: usize,
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub summary: Vec<String>,
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(getter_with_clone))]
     pub warnings: Vec<String>,
 }
 

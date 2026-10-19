@@ -1,4 +1,5 @@
 /target
+/pkg/
 .DS_Store
 /input/
 /output/

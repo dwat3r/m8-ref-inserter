@@ -6,8 +6,8 @@ use common::{
 use ref_inserter::insert::Options;
 use ref_inserter::inspect::{inspect, inspect_project};
 use ref_inserter::{
-    DEFAULT_CHAIN_PHRASES, DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Insertion, Project, Reference,
-    Report, Request, Settings, Source, insert_reference, plan_insertion, run,
+    DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID, Insertion, Project, Reference, Report, Request, Settings,
+    Source, insert_reference, plan_insertion, run,
 };
 
 const SLICES: u32 = 3;
@@ -92,11 +92,7 @@ fn core_summary_is_the_start_of_the_run_summary() {
 fn inspect_project_lines_equal_the_lines_inspect_prints_for_the_file() {
     let inputs = inputs();
     let (workspace, _) = run_on_disk(&inputs);
-    let options = Options {
-        empty: DEFAULT_EMPTY_ID,
-        phrase: DEFAULT_PHRASE_ID,
-        chain_phrases: DEFAULT_CHAIN_PHRASES,
-    };
+    let options = Options::for_inspect(DEFAULT_EMPTY_ID, DEFAULT_PHRASE_ID);
     let inserted = Project::parse(&insert(&inputs).project, PROJECT_NAME).unwrap();
     assert_eq!(
         inspect_project(&inserted, &options),

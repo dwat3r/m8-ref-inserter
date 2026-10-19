@@ -9,9 +9,15 @@ readme = "README.md"
 keywords = ["m8", "dirtywave", "tracker", "cli"]
 categories = ["command-line-utilities", "multimedia::audio"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
 m8-file-parser = { git = "https://github.com/Twinside/m8-file-parser", rev = "08d68bc706739e8e772596d2cae98047fd28359a" }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.129"

@@ -101,11 +101,10 @@ fn run_insert(args: InsertArgs) -> Result<(), String> {
 }
 
 fn run_inspect(args: InspectArgs) -> Result<(), String> {
-    let options = Options {
-        empty: args.empty_id.unwrap_or(DEFAULT_EMPTY_ID),
-        phrase: args.phrase_id.unwrap_or(DEFAULT_PHRASE_ID),
-        chain_phrases: DEFAULT_CHAIN_PHRASES,
-    };
+    let options = Options::for_inspect(
+        args.empty_id.unwrap_or(DEFAULT_EMPTY_ID),
+        args.phrase_id.unwrap_or(DEFAULT_PHRASE_ID),
+    );
     inspect(&args.project, &options)?
         .iter()
         .for_each(|line| println!("{line}"));

@@ -22,6 +22,16 @@ pub struct Options {
     pub chain_phrases: usize,
 }
 
+impl Options {
+    pub fn for_inspect(empty: u8, phrase: u8) -> Self {
+        Options {
+            empty,
+            phrase,
+            chain_phrases: crate::DEFAULT_CHAIN_PHRASES,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Layout {
     pub start_id: usize,
