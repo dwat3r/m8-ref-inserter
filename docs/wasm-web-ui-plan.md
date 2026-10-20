@@ -1,6 +1,8 @@
 # Wasm build and web UI
 
-Status: tasks 1 to 4 done (wasm compile check, core split, inspect split, wasm exports). Task 2 committed as `c651efe`, task 3 as `bb2dd48`, task 4 not committed yet.
+Status: tasks 1 to 5 done (wasm compile check, core split, inspect split, wasm exports, web page). Task 2 committed as `c651efe`, task 3 as `bb2dd48`, task 4 as `d293fb8`, task 5 in the commit that adds `web/index.html`.
+
+Local run: `wasm-pack build --target web --release --out-dir web/pkg`, then serve `web/` with any static server (for example `python3 -m http.server` inside `web/`). `web/pkg/` is gitignored build output.
 
 **Goal:** use the reference inserter from a phone next to the M8. The tool is built to wasm and wrapped in a minimal static web page hosted on the repo's GitHub Pages. The page takes an `.m8s` and a WAV, runs insert in the browser, and offers two downloads: the new project and the cued WAV. Nothing is uploaded anywhere.
 
@@ -19,7 +21,7 @@ Status: tasks 1 to 4 done (wasm compile check, core split, inspect split, wasm e
 - `Options::for_inspect(empty, phrase)` builds the inspect options with the default chain phrases; the CLI, the wasm export and the tests share it.
 - Errors from the core (`Err(String)`) become thrown JS errors, shown in the page.
 - Inputs in the UI: `.m8s`, `.wav`, `m8-dir` (required, saved in `localStorage`), `bpm` (optional), `chain-phrases` select (4, 8, 12, 16), `force` checkbox, `empty-id` and `phrase-id` (hex text, defaults `FE` and `F0`).
-- Flow: picking the `.m8s` runs inspect and shows its lines. Run shows the summary and warnings. Two buttons, "Download project" and "Download WAV", save the two files as plain browser downloads. The WAV name is the slugged name from the core, no rename field.
+- Flow: picking the `.m8s` runs inspect and shows its lines (and again when the empty or phrase id changes). Run shows the summary and warnings. Two buttons, "Download project" and "Download WAV", save the two files as plain browser downloads. The WAV name is the slugged name from the core, no rename field. The project downloads as `<original name>-ref.m8s`. Changing any input clears the result.
 - Layout: single column, large tap targets, works at phone width.
 - No dry-run: the summary is shown before anything is saved, so the page already is one.
 - No size cap on the WAV. A memory failure surfaces as an error.
@@ -37,7 +39,7 @@ Status: tasks 1 to 4 done (wasm compile check, core split, inspect split, wasm e
 3. Split `inspect` the same way.
 4. Add the wasm exports behind `cfg(target_arch = "wasm32")` with `wasm-bindgen` as a target-specific dependency, so the native build and the CLI do not pull it in. Add `crate-type`.
 5. Write `web/index.html`: form, inspect on file pick, run, summary and warnings, two download buttons, `localStorage` for `m8-dir`.
-6. CI: add a job that runs `wasm-pack build --target web --locked` as the compile check. Add a Pages deploy job on push to master that publishes `web/` and the wasm `pkg/` output.
+6. CI: add a job that runs `wasm-pack build --target web --release --out-dir web/pkg` as the compile check. Add a Pages deploy job on push to master that builds the same way and publishes `web/`.
 7. README: add the web UI link and a short usage section. Update `docs/ref-song-inserter-plan.md` status.
 
 ## Acceptance

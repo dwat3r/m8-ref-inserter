@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M8 reference inserter</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f6f4;
+    --surface: #ffffff;
+    --text: #1c1c1a;
+    --muted: #62625d;
+    --border: #cfcfc8;
+    --accent: #0b6b57;
+    --accent-text: #ffffff;
+    --error: #b3261e;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614;
+      --surface: #21211e;
+      --text: #ececE8;
+      --muted: #a2a29a;
+      --border: #3d3d38;
+      --accent: #3fc3a3;
+      --accent-text: #0d1f1a;
+      --error: #f2877f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, sans-serif;
+  }
+  main { max-width: 34rem; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { margin: 0; font-size: 1.4rem; }
+  p { margin: 0; color: var(--muted); }
+  form { display: grid; gap: 16px; }
+  label { display: grid; gap: 6px; font-weight: 600; }
+  label small { font-weight: 400; color: var(--muted); }
+  input, select, button {
+    font: inherit;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    width: 100%;
+  }
+  input[type="checkbox"] { width: 24px; min-height: 24px; }
+  .check { display: flex; align-items: center; gap: 12px; }
+  details { border: 1px solid var(--border); border-radius: var(--radius); padding: 0 12px; }
+  summary { min-height: 48px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+  details > .fields { display: grid; gap: 16px; padding-bottom: 16px; }
+  button { cursor: pointer; font-weight: 600; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .downloads { display: grid; gap: 12px; }
+  pre {
+    margin: 0;
+    padding: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font: 0.9rem/1.4 ui-monospace, monospace;
+  }
+  pre:empty { display: none; }
+  #error { color: var(--error); font-weight: 600; }
+  #error:empty { display: none; }
+  [hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>M8 reference inserter</h1>
+  <p>Insert a reference song into an M8 (FW 6.6) project as sliced chains. Everything runs in this browser, nothing is uploaded.</p>
+
+  <form id="form">
+    <label>M8 project (.m8s)
+      <input id="project" type="file" accept=".m8s">
+    </label>
+    <pre id="inspection" aria-live="polite"></pre>
+
+    <label>Reference song (.wav)
+      <input id="reference" type="file" accept=".wav,audio/wav,audio/x-wav">
+    </label>
+
+    <label>Folder on the M8
+      <input id="m8-dir" type="text" required placeholder="/Samples/Reference" autocapitalize="none" autocomplete="off" spellcheck="false">
+      <small>Where you will copy the WAV on the SD card.</small>
+    </label>
+
+    <details>
+      <summary>Options</summary>
+      <div class="fields">
+        <label>BPM of the reference
+          <input id="bpm" type="number" min="1" step="any" inputmode="decimal" placeholder="project tempo">
+        </label>
+        <label>Phrases per chain
+          <select id="chain-phrases">
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+            <option value="12">12</option>
+            <option value="16">16</option>
+          </select>
+        </label>
+        <label>Empty chain and phrase id (hex)
+          <input id="empty-id" type="text" value="FE" maxlength="2" autocapitalize="characters" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Shared phrase id (hex)
+          <input id="phrase-id" type="text" value="F0" maxlength="2" autocapitalize="characters" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="check">
+          <input id="force" type="checkbox">
+          Replace a previous insertion
+        </label>
+      </div>
+    </details>
+
+    <button id="run" class="primary" type="submit" disabled>Insert reference</button>
+  </form>
+
+  <p id="error" role="alert"></p>
+  <pre id="summary" aria-live="polite"></pre>
+
+  <div id="downloads" class="downloads" hidden>
+    <button id="download-project" type="button">Download project</button>
+    <button id="download-wav" type="button">Download WAV</button>
+  </div>
+</main>
+
+<script type="module">
+  import init, { Settings, insertReference, inspectProject } from "./pkg/ref_inserter.js";
+
+  const M8_DIR_STORAGE_KEY = "m8-dir";
+  const HEX_ID_PATTERN = /^[0-9a-f]{1,2}$/i;
+  const REVOKE_DELAY_MS = 1000;
+
+  const element = (id) => document.getElementById(id);
+  const selectedFile = (id) => element(id).files[0];
+
+  const readBytes = async (file) => new Uint8Array(await file.arrayBuffer());
+
+  const loadSavedM8Dir = () => {
+    try {
+      return localStorage.getItem(M8_DIR_STORAGE_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  };
+
+  const saveM8Dir = (m8Dir) => {
+    try {
+      localStorage.setItem(M8_DIR_STORAGE_KEY, m8Dir);
+    } catch {
+      // storage can be blocked, the folder is then only remembered until reload
+    }
+  };
+
+  const parseHexId = (text, label) => {
+    const trimmed = text.trim();
+    if (!HEX_ID_PATTERN.test(trimmed)) {
+      throw new Error(`${label} must be 1 or 2 hex digits`);
+    }
+    return Number.parseInt(trimmed, 16);
+  };
+
+  const readIds = () => ({
+    emptyId: parseHexId(element("empty-id").value, "Empty id"),
+    phraseId: parseHexId(element("phrase-id").value, "Shared phrase id"),
+  });
+
+  const readSettings = () => {
+    const m8Dir = element("m8-dir").value.trim();
+    if (m8Dir === "") {
+      throw new Error("Enter the folder on the M8");
+    }
+    const { emptyId, phraseId } = readIds();
+    const bpm = element("bpm").value;
+    const settings = new Settings();
+    settings.m8_dir = m8Dir;
+    settings.empty_id = emptyId;
+    settings.phrase_id = phraseId;
+    settings.chain_phrases = Number(element("chain-phrases").value);
+    settings.force = element("force").checked;
+    settings.bpm = bpm === "" ? undefined : Number(bpm);
+    return settings;
+  };
+
+  const projectOutputName = (projectName) => projectName.replace(/(\.m8s)?$/i, "-ref.m8s");
+
+  const saveFile = (bytes, name) => {
+    const url = URL.createObjectURL(new Blob([bytes]));
+    const link = Object.assign(document.createElement("a"), { href: url, download: name });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+  };
+
+  const showLines = (id, lines) => {
+    element(id).textContent = lines.join("\n");
+  };
+
+  const showError = (error) => {
+    element("error").textContent = error instanceof Error ? error.message : String(error);
+  };
+
+  let pendingDownloads = null;
+
+  const clearResult = () => {
+    pendingDownloads = null;
+    element("downloads").hidden = true;
+    showLines("summary", []);
+    element("error").textContent = "";
+  };
+
+  const updateRunButton = () => {
+    element("run").disabled = !(selectedFile("project") && selectedFile("reference"));
+  };
+
+  const refreshInspection = async () => {
+    const projectFile = selectedFile("project");
+    if (!projectFile) {
+      showLines("inspection", []);
+      return;
+    }
+    try {
+      const { emptyId, phraseId } = readIds();
+      showLines(
+        "inspection",
+        inspectProject(await readBytes(projectFile), projectFile.name, emptyId, phraseId),
+      );
+    } catch (error) {
+      showLines("inspection", []);
+      showError(error);
+    }
+  };
+
+  const insertWithFormSettings = (source) => {
+    const settings = readSettings();
+    try {
+      return insertReference(
+        source.projectBytes,
+        source.projectName,
+        source.referenceBytes,
+        source.referenceName,
+        settings,
+      );
+    } finally {
+      settings.free();
+    }
+  };
+
+  const insert = async () => {
+    const projectFile = selectedFile("project");
+    const referenceFile = selectedFile("reference");
+    const insertion = insertWithFormSettings({
+      projectBytes: await readBytes(projectFile),
+      projectName: projectFile.name,
+      referenceBytes: await readBytes(referenceFile),
+      referenceName: referenceFile.name,
+    });
+    pendingDownloads = {
+      projectBytes: insertion.project,
+      projectName: projectOutputName(projectFile.name),
+      wavBytes: insertion.wav,
+      wavName: insertion.file_name,
+    };
+    showLines("summary", [...insertion.summary, ...insertion.warnings]);
+    insertion.free();
+    element("downloads").hidden = false;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    clearResult();
+    const runButton = element("run");
+    runButton.disabled = true;
+    runButton.textContent = "Working...";
+    await new Promise(requestAnimationFrame);
+    try {
+      await insert();
+    } catch (error) {
+      showError(error);
+    } finally {
+      runButton.textContent = "Insert reference";
+      updateRunButton();
+    }
+  };
+
+  const handleInputChange = () => {
+    clearResult();
+    updateRunButton();
+  };
+
+  const start = async () => {
+    element("m8-dir").value = loadSavedM8Dir();
+    try {
+      await init();
+    } catch (error) {
+      showError(new Error(`Could not load the wasm module: ${error}`));
+      return;
+    }
+    element("form").addEventListener("submit", handleSubmit);
+    element("form").addEventListener("input", handleInputChange);
+    element("m8-dir").addEventListener("input", () => saveM8Dir(element("m8-dir").value.trim()));
+    element("project").addEventListener("change", refreshInspection);
+    element("empty-id").addEventListener("change", refreshInspection);
+    element("phrase-id").addEventListener("change", refreshInspection);
+    element("download-project").addEventListener("click", () =>
+      saveFile(pendingDownloads.projectBytes, pendingDownloads.projectName),
+    );
+    element("download-wav").addEventListener("click", () =>
+      saveFile(pendingDownloads.wavBytes, pendingDownloads.wavName),
+    );
+  };
+
+  start();
+</script>
+</body>
+</html>

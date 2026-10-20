@@ -1,5 +1,5 @@
 /target
-/pkg/
+/web/pkg/
 .DS_Store
 /input/
 /output/
