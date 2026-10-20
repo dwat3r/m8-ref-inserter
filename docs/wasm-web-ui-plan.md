@@ -1,6 +1,6 @@
 # Wasm build and web UI
 
-Status: tasks 1 to 5 done (wasm compile check, core split, inspect split, wasm exports, web page). Task 2 committed as `c651efe`, task 3 as `bb2dd48`, task 4 as `d293fb8`, task 5 in the commit that adds `web/index.html`.
+Status: tasks 1 to 6 done (wasm compile check, core split, inspect split, wasm exports, web page, CI). The new CI jobs have not run on GitHub yet; `git log` has the commit for each task.
 
 Local run: `wasm-pack build --target web --release --out-dir web/pkg`, then serve `web/` with any static server (for example `python3 -m http.server` inside `web/`). `web/pkg/` is gitignored build output.
 
