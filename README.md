@@ -46,6 +46,19 @@ ref_inserter inspect <project.m8s> [--empty-id <hex>] [--phrase-id <hex>]
 
 Prints the firmware and tempo, what instrument 7F holds, any previous reference insertion (chains, slices, song rows, layout, phrases per chain) and a stray shared phrase. It reads the project and writes nothing. Use it to see what `--force` would replace.
 
+## Web version
+
+https://dwat3r.github.io/m8-ref-inserter/ runs the same code in the browser as wasm, so it works from a phone next to the M8. Nothing is uploaded: the project and the WAV are read and processed on the device.
+
+1. Pick the `.m8s`. The page shows what `inspect` reports for it.
+2. Pick the reference WAV and type the folder as the M8 sees it (the `--m8-dir` value). The folder is remembered.
+3. Open Options for `--bpm`, `--chain-phrases`, `--empty-id`, `--phrase-id` and `--force` (replace a previous insertion).
+4. Press Insert reference to see the same summary and warnings as the CLI, then download the new project (`<name>-ref.m8s`) and the sliced WAV.
+
+Copy both files to the SD card, the WAV into the folder you typed. The browser has no destination directory and no existing files to protect, so the checks on `--dest-dir` and `--out` do not apply.
+
+To build it locally: `wasm-pack build --target web --release --out-dir web/pkg`, then serve the `web/` directory with any static file server.
+
 ## Limits
 
 - FW 6.6 projects only.

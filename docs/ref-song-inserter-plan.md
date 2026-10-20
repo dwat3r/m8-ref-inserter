@@ -1,6 +1,6 @@
 # Reference Song Inserter
 
-Status: built and released as v0.1.0 (https://github.com/dwat3r/m8-ref-inserter/releases/tag/v0.1.0, MIT). 203 tests: 116 unit, 7 CLI, 79 e2e, 1 round-trip. CI passes on Linux, Windows and macOS (arm64 and Intel).
+Status: built and released as v0.1.0 (https://github.com/dwat3r/m8-ref-inserter/releases/tag/v0.1.0, MIT). 213 tests: 116 unit, 7 CLI, 10 core, 79 e2e, 1 round-trip. CI passes on Linux, Windows and macOS (arm64 and Intel). A browser version built from the same code (wasm) is live at https://dwat3r.github.io/m8-ref-inserter/, see `docs/wasm-web-ui-plan.md`.
 
 **Goal:** CLI that inserts a reference WAV into a Dirtywave M8 project (FW 6.6) as a sliced sampler instrument (7F) plus chains that play the slices, placed after the existing song, written to a new `.m8s`.
 

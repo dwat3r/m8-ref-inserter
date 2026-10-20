@@ -1,6 +1,6 @@
 # Wasm build and web UI
 
-Status: tasks 1 to 6 done (wasm compile check, core split, inspect split, wasm exports, web page, CI). The new CI jobs have not run on GitHub yet; `git log` has the commit for each task.
+Status: all 7 tasks done (wasm compile check, core split, inspect split, wasm exports, web page, CI, docs). Live at https://dwat3r.github.io/m8-ref-inserter/; CI passes. `git log` has the commit for each task. Not yet checked on a real phone or in Safari.
 
 Local run: `wasm-pack build --target web --release --out-dir web/pkg`, then serve `web/` with any static server (for example `python3 -m http.server` inside `web/`). `web/pkg/` is gitignored build output.
 
